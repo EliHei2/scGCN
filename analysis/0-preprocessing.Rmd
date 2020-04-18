@@ -1,0 +1,104 @@
+<!-- 2020-04-17 17:13 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/0-preprocessing.Rmd-->
+
+---
+title: "Preprocessing Zebrafish Datasets"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Siences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+## Setup
+
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/0-preprocessing.Rmd', view=F, verbose=T, delete_cache=F, cache.lazy = FALSE)
+```
+
+## Load dependencies
+```{r load_packages, message=FALSE, warning=FALSE, paged.print=FALSE}
+suppressMessages(source('code/R/dep.R'))
+```
+
+## Initialization and load data
+```{r load_data, message=FALSE, warning=FALSE, paged.print=FALSE}
+# initialization
+tidy_farrell   = 'data_tidy/farrell'
+tidy_wagner    = 'data_tidy/wagner'
+output_farrell = 'output/farrell'
+output_wagner  = 'output/wagner'
+# load farrell data
+mtx_farrell    = fread(file.path(tidy_farrell, 'count_matrix.txt')) %>% setkey('GENE')
+meta_farrell   = fread(file.path(tidy_farrell, 'meta_data.txt')) %>% setkey('barcode')
+# load wagner data
+mtx_wagner     = fread(file.path(tidy_wagner, 'count_matrix.txt')) %>% setkey('GENE')
+meta_wagner    = fread(file.path(tidy_wagner, 'meta_data.txt')) %>% setkey('barcode')
+```
+
+## Subset datasets
+```{r subset_data, message=FALSE, warning=FALSE, paged.print=FALSE}
+# subset matrices on shared cell types
+type_farrell  = names(meta_farrell) %>% setdiff(c('', 'barcode', 'Stage', 'Segment'))
+type_wagner   = c(unique(meta_wagner$type), unique(meta_wagner$subtype)) %>% setdiff('')
+shared_types  = type_farrell %>% map(agrep, x=type_wagner, max.distance=0.5) 
+type_farrell  = type_farrell[shared_types %>% map(length) %>% unlist() != 0]
+type_wagner   = type_wagner[shared_types %>% unlist()]
+## farrell
+idx_farrell   = which(rowSums(meta_farrell[, ..type_farrell]) > 0)
+cells_farrell = meta_farrell$barcode[idx_farrell]
+mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
+rm(idx_farrell, cells_farrell)
+## wagner
+cells_wagner  = meta_wagner[type %in% type_wagner | subtype %in% type_wagner, get('barcode')]
+mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
+rm(idx_wagner, cells_wagner)
+# subset matrices on shared genes
+shared_genes  = intersect(mtx_wagner$GENE, mtx_farrell$GENE)
+mtx_farrell   = mtx_farrell[shared_genes, ]
+mtx_wagner    = mtx_wagner[shared_genes, ]
+rm(shared_genes)
+gc()
+```
+
+## Select higely variable genes
+```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
+# select higly variable genes
+hvg          = hv_genes(as.matrix(mtx_wagner[,-c('GENE')]), 300)
+hvg          = mtx_wagner[hvg, get('GENE')]
+# subset farrell
+data_farrell = data.table(t(as.matrix(mtx_farrell[hvg, -c('GENE')])))
+names(data_farrell) = mtx_farrell[hvg, GENE]
+# subset wagner
+data_wagner  = data.table(t(as.matrix(mtx_wagner[hvg, -c('GENE')])))
+names(data_wagner) = mtx_wagner[hvg, GENE]
+# rm(mtx_farrell, mtx_wagner)
+gc()
+```
+
+## Construct GGM
+```{r ggm, message=FALSE, warning=FALSE, paged.print=FALSE}
+rho = 0.1
+# ggm for farrell
+ggm_farrell = ggm(data_farrell, rho=rho)
+isolated  = which(degree(ggm_farrell)==0)
+ggm_farrell = delete.vertices(ggm_farrell, isolated)
+res_farrell = graph_vis(ggm_farrell, plot=T)
+res_farrell$vis_net
+# ggm for wagner
+ggm_wagner = ggm(data_wagner, rho=rho)
+isolated  = which(degree(ggm_wagner)==0)
+ggm_wagner = delete.vertices(ggm_wagner, isolated)
+res_wagner = graph_vis(ggm_wagner, plot=T)
+res_wagner$vis_net
+```
