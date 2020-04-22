@@ -40,7 +40,8 @@ import_cran('devtools')
 
 cran_packages = c('gRim', 'glasso', 'methods', 'Matrix',
   'igraph', 'graph', 'data.table', 'visNetwork', 'SIN',
-  'Rtsne', 'RColorBrewer', 'doParallel', 'reshape2', 'qgraph')
+  'Rtsne', 'RColorBrewer', 'doParallel', 'reshape2', 'qgraph',
+  'magrittr')
 
 bioc_packages = c('genefilter', 'limma', 'BiocParallel',
   'gRbase', 'RBGL', 'Rgraphviz', 'gRain',
