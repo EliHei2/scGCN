@@ -155,7 +155,7 @@ ggm_wagner = ggm(data_wagner, rho=rho)
 # isolated  = which(degree(ggm_wagner)==0)
 # ggm_wagner = delete.vertices(ggm_wagner, isolated)
 res_wagner = graph_vis(ggm_wagner, plot=T)
-res_wagner$vis_net
+# res_wagner$vis_net
 ```
 
 ### Farrell, rho = 0.05
@@ -166,7 +166,7 @@ ggm_farrell = ggm(data_farrell, rho=rho)
 # isolated  = which(degree(ggm_farrell)==0)
 # ggm_farrell = delete.vertices(ggm_farrell, isolated)
 res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities)
-res_farrell$vis_net
+# res_farrell$vis_net
 ```
 
 ### Farrell, rho = 0.1
@@ -177,5 +177,5 @@ ggm_farrell = ggm(data_farrell, rho=rho)
 # isolated  = which(degree(ggm_farrell)==0)
 # ggm_farrell = delete.vertices(ggm_farrell, isolated)
 res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities)
-res_farrell$vis_net
+# res_farrell$vis_net
 ```
