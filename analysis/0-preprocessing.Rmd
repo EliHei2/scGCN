@@ -59,7 +59,8 @@ type_farrell = names(meta_farrell) %>%
     setdiff('') %>%
     sort
 type_wagner  = melt(meta_wagner, measure = patterns("type$")) %>%
-    .$value %>%
+    .$value %>% 
+    str_remove_all('dorsal |ventral |lateral | *anterior *| *posterior *') %>%
     setdiff('') %>%
     sort
 abv_farrell  = type_farrell %>% substr(1, 5)
@@ -85,7 +86,6 @@ cells_wagner  = meta_wagner[type %in% type_wagner |
                             subsubtype %in% type_wagner,
                             get('barcode')]
 mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
-# rm(idx_wagner, cells_wagner)
 # subset matrices on shared genes
 shared_genes  = intersect(mtx_wagner$GENE, mtx_farrell$GENE)
 mtx_farrell   = mtx_farrell[shared_genes, ]
@@ -94,9 +94,10 @@ mtx_wagner    = mtx_wagner[shared_genes, ]
 gc()
 ```
 
+## Find shared types
 ```{r cluster_prop, message=FALSE, warning=FALSE, paged.print=FALSE}
+# select shared types based on abreviated names
 abv_types    = unique(shared_types$abv)
-
 meta_farrell = meta_farrell[cells_farrell, ]
 type_farrell = names(meta_farrell)
 abv_farrell  = abv_types %>% 
@@ -114,7 +115,6 @@ abv_farrell = melt(abv_farrell[, -c('Segment', 'Stage')], id.vars='barcode')
 abv_farrell = abv_farrell[(value > 0)] %>%
     setnames('variable', 'abv_type') %>%
     .[, c('barcode', 'abv_type')]
-
 meta_wagner = meta_wagner[cells_wagner, ]
 strx <- function(types){
     types %>% map(function(x) c(na.omit(str_extract(x, abv_types)))[1]) %>% unlist
@@ -124,31 +124,30 @@ abv_wagner = meta_wagner  %>%
     .[is.na(abv_type), abv_type:= strx(subtype)] %>%
     .[is.na(abv_type), abv_type:= strx(type)] %>%
     .[, c('barcode', 'abv_type')]
-
+# subset cells
 ## farrell
-# cells_farrell = abv_farrell[which(epide), ]$barcode
 cells_farrell = unique(abv_farrell$barcode)
 mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
 ## wagner
-# cells_wagner  = meta_wagner[abv_type == 'epide', ]$barcode
 cells_wagner  = abv_wagner$barcode
 mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
 ```
+
 ## Balance cell type compositions
 ```{r bal_comp, message=FALSE, warning=FALSE, paged.print=FALSE}
-# cmp_farrell = table(abv_farrell$abv_type)
-# cmp_wagner = table(abv_wagner$abv_type)
-# cmp_table = pmin(cmp_wagner, cmp_farrell)
-# abv_farrell %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
-# abv_wagner %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type'] 
-# ## farrell
-# # cells_farrell = abv_farrell[which(epide), ]$barcode
-# cells_farrell = unique(abv_farrell$barcode)
-# mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
-# ## wagner
-# # cells_wagner  = meta_wagner[abv_type == 'epide', ]$barcode
-# cells_wagner  = abv_wagner$barcode
-# mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
+# calculate cell type composition
+cmp_farrell = table(abv_farrell$abv_type)
+cmp_wagner  = table(abv_wagner$abv_type)
+cmp_table   = pmin(cmp_wagner, cmp_farrell)
+abv_farrell %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
+abv_wagner  %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
+# subset w.r.t compositions
+## farrell
+cells_farrell = unique(abv_farrell$barcode)
+mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
+## wagner
+cells_wagner  = abv_wagner$barcode
+mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
 ```
 
 ## Select higely variable genes
@@ -180,7 +179,6 @@ isolated  = which(degree(ggm_wagner) == 0)
 ggm_wagner = delete.vertices(ggm_wagner, isolated)
 res_wagner = graph_vis(ggm_wagner, plot=T)
 title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
-# res_wagner$vis_net
 ```
 
 #### Farrell, rho = 0.05
