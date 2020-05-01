@@ -46,7 +46,7 @@
 #' @importFrom  dplyr %>%
 #' @importFrom  qgraph qgraph
 
-graph_vis <- function(graph, directed = F, community = T, betweenness = T, plot = F, ...) {
+graph_vis <- function(graph, directed = F, community = T, betweenness = T, plot = F, title = NULL, ...) {
 
     arguments      = list(...)
     usr_groups     = arguments$groups
@@ -126,16 +126,19 @@ graph_vis <- function(graph, directed = F, community = T, betweenness = T, plot 
             bidirectional = T,
             groups        = as.factor(V(ig)$community),
             layout        = "spring",
-            palette       = "ggplot2",
+            palette       = "pastel",
             label.norm    = "OOOOOOO",
             labels        = names(V(ig)),
             vsize         = max(1, 0.5 + 320 / (length(V(ig)) + 50)),
             filetype      = arguments$filetype,
             filename      = arguments$filename,
             legend        = FALSE,
-            esize         = 1,
+            esize         = .2,
             label.prop    = 1.3,
-            borders       = FALSE
+            borders       = FALSE,
+            curve         = .01,
+            curveAll      = TRUE,
+            title         = title
         )
         V(ig)$color = gg$graphAttributes$Nodes$color
     }

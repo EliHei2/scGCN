@@ -22,7 +22,7 @@ output:
 
 ```{r setup, include = FALSE}
 library('BiocStyle')
-knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='pdf', cache.lazy = FALSE)
+knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='png', cache.lazy = FALSE)
 # wflow_build(files='analysis/0-preprocessing.Rmd', view=F, verbose=T, delete_cache=F, cache.lazy = FALSE)
 ```
 
@@ -41,7 +41,7 @@ output_wagner  = 'output/wagner'
 # load farrell data
 mtx_farrell    = fread(file.path(tidy_farrell, 'count_matrix.txt')) %>% setkey('GENE')
 meta_farrell   = fread(file.path(tidy_farrell, 'meta_data.txt')) %>% setkey('barcode')
-type_cols     = names(meta_farrell) %>% setdiff(c('', 'barcode', 'Stage', 'Segment'))
+type_cols      = names(meta_farrell) %>% setdiff(c('', 'barcode', 'Stage', 'Segment'))
 meta_farrell[, (type_cols):=lapply(.SD, as.logical), .SDcols = type_cols]
 # load wagner data
 mtx_wagner     = fread(file.path(tidy_wagner, 'count_matrix.txt')) %>% setkey('GENE')
@@ -51,24 +51,27 @@ meta_wagner    = fread(file.path(tidy_wagner, 'meta_data.txt')) %>% setkey('barc
 ## Subset datasets
 ```{r subset_data}
 # subset matrices on shared cell types
-type_farrell = names(meta_farrell) %>% setdiff(c('', 'barcode', 'Stage', 'Segment'))
-type_wagner  = melt(meta_wagner, measure = patterns("type$"))
-type_wagner  %<>% .$value %>% setdiff('')
-type_farrell %<>% str_remove("cephalic.") %>% sort
-type_wagner  %<>% 
+type_farrell = names(meta_farrell) %>%
+    setdiff(c('', 'barcode', 'Stage', 'Segment')) %>%
+    str_remove("cephalic.") %>%
+    sort %>% 
     str_remove_all('dorsal |ventral |lateral | *anterior *| *posterior *') %>%
+    setdiff('') %>%
+    sort
+type_wagner  = melt(meta_wagner, measure = patterns("type$")) %>%
+    .$value %>%
     setdiff('') %>%
     sort
 abv_farrell  = type_farrell %>% substr(1, 5)
 abv_wagner   = type_wagner %>% substr(1, 5)
-type_farrell = data.table(type_farrell = type_farrell, abv = abv_farrell) %>% setkey(abv)
-type_wagner  = data.table(type_wagner = type_wagner, abv = abv_wagner) %>% setkey(abv)
+type_farrell = data.table(type_farrell=type_farrell, abv=abv_farrell) %>% setkey(abv)
+type_wagner  = data.table(type_wagner=type_wagner, abv=abv_wagner) %>% setkey(abv)
 shared_types = type_wagner[type_farrell, on = 'abv', nomatch=0]
 type_farrell = names(meta_farrell) %>% 
     grep(paste(shared_types$type_farrell, collapse='|'), .) %>%
     names(meta_farrell)[.]
 type_wagner  = melt(meta_wagner, measure=patterns("type$"))$value %>% setdiff('')
-type_wagner  = type_wagner %>% 
+type_wagner  %<>% 
     grep(paste(shared_types$type_wagner, collapse='|'), .) %>%
     type_wagner[.]
 ## farrell
@@ -96,10 +99,10 @@ abv_types    = unique(shared_types$abv)
 
 meta_farrell = meta_farrell[cells_farrell, ]
 type_farrell = names(meta_farrell)
-abv_farrell = abv_types %>% 
+abv_farrell  = abv_types %>% 
     map(function(x) grep(x, type_farrell)) %>%
     map(function(x) rowSums(meta_farrell[, ..x])) %>%
-    map(function(x) x > 0) %>% 
+    # map(function(x) x > 0) %>% 
     purrr::reduce(cbind) %>%
     data.table %>%
     setnames(abv_types) %>%
@@ -107,75 +110,142 @@ abv_farrell = abv_types %>%
     setkey(barcode)
 sel_farrell = which(rowSums(abv_farrell[, -c('barcode', 'Stage', 'Segment')]) == 1)
 abv_farrell = abv_farrell[sel_farrell, ]
+abv_farrell = melt(abv_farrell[, -c('Segment', 'Stage')], id.vars='barcode')
+abv_farrell = abv_farrell[(value > 0)] %>%
+    setnames('variable', 'abv_type') %>%
+    .[, c('barcode', 'abv_type')]
 
-meta_wagner  = meta_wagner[cells_wagner, ]
+meta_wagner = meta_wagner[cells_wagner, ]
 strx <- function(types){
     types %>% map(function(x) c(na.omit(str_extract(x, abv_types)))[1]) %>% unlist
 }
-meta_wagner  %<>%
+abv_wagner = meta_wagner  %>%
     .[, abv_type:=strx(subsubtype)] %>%
     .[is.na(abv_type), abv_type:= strx(subtype)] %>%
-    .[is.na(abv_type), abv_type:= strx(type)]
+    .[is.na(abv_type), abv_type:= strx(type)] %>%
+    .[, c('barcode', 'abv_type')]
+
 ## farrell
 # cells_farrell = abv_farrell[which(epide), ]$barcode
-cells_farrell = abv_farrell$barcode
+cells_farrell = unique(abv_farrell$barcode)
 mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
 ## wagner
 # cells_wagner  = meta_wagner[abv_type == 'epide', ]$barcode
-cells_wagner  = meta_wagner$barcode
+cells_wagner  = abv_wagner$barcode
 mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
-# subset matrices on shared genes
-shared_genes  = intersect(mtx_wagner$GENE, mtx_farrell$GENE)
-mtx_farrell   = mtx_farrell[shared_genes, ]
-mtx_wagner    = mtx_wagner[shared_genes, ]
+```
+## Balance cell type compositions
+```{r bal_comp, message=FALSE, warning=FALSE, paged.print=FALSE}
+# cmp_farrell = table(abv_farrell$abv_type)
+# cmp_wagner = table(abv_wagner$abv_type)
+# cmp_table = pmin(cmp_wagner, cmp_farrell)
+# abv_farrell %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
+# abv_wagner %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type'] 
+# ## farrell
+# # cells_farrell = abv_farrell[which(epide), ]$barcode
+# cells_farrell = unique(abv_farrell$barcode)
+# mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
+# ## wagner
+# # cells_wagner  = meta_wagner[abv_type == 'epide', ]$barcode
+# cells_wagner  = abv_wagner$barcode
+# mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
 ```
 
 ## Select higely variable genes
 ```{r hvg}
 # select higly variable genes
-hvg          = hv_genes(as.matrix(mtx_wagner[, -c('GENE')]), 300)
-hvg          = mtx_wagner[hvg, get('GENE')]
+hvg                 = hv_genes(as.matrix(mtx_wagner[, -c('GENE')]), 400)
+hvg                 = mtx_wagner[hvg, get('GENE')]
 # subset farrell
-data_farrell = data.table(t(as.matrix(mtx_farrell[hvg, -c('GENE')])))
+data_farrell        = data.table(t(as.matrix(mtx_farrell[hvg, -c('GENE')])))
 names(data_farrell) = mtx_farrell[hvg, GENE]
-const_cols = which(colSds(as.matrix(data_farrell)) == 0)
+const_cols          = which(colSds(as.matrix(data_farrell)) == 0)
 data_farrell %<>% as.data.table() %>% .[, -..const_cols]
 # subset wagner
-data_wagner  = data.table(t(as.matrix(mtx_wagner[hvg, -c('GENE')])))
-names(data_wagner) = mtx_wagner[hvg, GENE]
+data_wagner         = data.table(t(as.matrix(mtx_wagner[hvg, -c('GENE')])))
+names(data_wagner)  = mtx_wagner[hvg, GENE]
 ```
 
-## Construct GGM {.tabset}
+## Construct GGM, Wagner's {.tabset}
 
-### Wagner, rho = 0.1
-```{r ggm_wagner_0.1}
-rho = 0.15
+
+### Wagner, rho = 0.2 {.tabset}
+
+#### Wagner
+```{r ggm_wagner_0.2}
+rho = 0.2
 # ggm for wagner
 ggm_wagner = ggm(data_wagner, rho=rho)
-# isolated  = which(degree(ggm_wagner)==0)
-# ggm_wagner = delete.vertices(ggm_wagner, isolated)
+isolated  = which(degree(ggm_wagner) == 0)
+ggm_wagner = delete.vertices(ggm_wagner, isolated)
 res_wagner = graph_vis(ggm_wagner, plot=T)
+title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 # res_wagner$vis_net
 ```
 
-### Farrell, rho = 0.05
-```{r ggm_farrell_0.05}
-rho = 0.07
+#### Farrell, rho = 0.05
+```{r ggm_farrell_0.05_.2}
+rho = 0.05
 # ggm for farrell
-ggm_farrell = ggm(data_farrell, rho=rho)
-# isolated  = which(degree(ggm_farrell)==0)
-# ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities)
-# res_farrell$vis_net
+keep_genes = names(V(ggm_wagner))
+ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
+isolated  = which(degree(ggm_farrell)==0)
+ggm_farrell = delete.vertices(ggm_farrell, isolated)
+res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 ```
 
-### Farrell, rho = 0.1
-```{r ggm_farrell_0.1}
+#### Farrell, rho = 0.1
+```{r ggm_farrell_0.1_.2}
 rho = 0.1
 # ggm for farrell
-ggm_farrell = ggm(data_farrell, rho=rho)
-# isolated  = which(degree(ggm_farrell)==0)
-# ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities)
-# res_farrell$vis_net
+keep_genes = names(V(ggm_wagner))
+ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
+isolated  = which(degree(ggm_farrell)==0)
+ggm_farrell = delete.vertices(ggm_farrell, isolated)
+res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+```
+
+
+### Wagner, rho = 0.3 {.tabset}
+
+#### Wagner
+```{r ggm_wagner_0.3}
+rho = 0.3
+# ggm for wagner
+ggm_wagner = ggm(data_wagner, rho=rho)
+isolated  = which(degree(ggm_wagner) == 0)
+ggm_wagner = delete.vertices(ggm_wagner, isolated)
+res_wagner = graph_vis(ggm_wagner, plot=T)
+title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+```
+
+#### Farrell, rho = 0.05
+```{r ggm_farrell_0.05_.3}
+rho = 0.05
+# ggm for farrell
+keep_genes = names(V(ggm_wagner))
+ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
+isolated  = which(degree(ggm_farrell)==0)
+ggm_farrell = delete.vertices(ggm_farrell, isolated)
+res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+```
+
+#### Farrell, rho = 0.1
+```{r ggm_farrell_0.1_.3}
+rho = 0.1
+# ggm for farrell
+keep_genes = names(V(ggm_wagner))
+ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
+isolated  = which(degree(ggm_farrell)==0)
+ggm_farrell = delete.vertices(ggm_farrell, isolated)
+res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+```
+
+## Session Info
+```{r sess, message=FALSE, warning=FALSE, paged.print=FALSE, include = FALSE}
+
 ```
