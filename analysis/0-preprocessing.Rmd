@@ -131,6 +131,10 @@ mtx_farrell   = mtx_farrell[, c('GENE', ..cells_farrell)]
 ## wagner
 cells_wagner  = abv_wagner$barcode
 mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
+file.path(tidy_farrell, 'abv_types.txt') %>%
+    fwrite(abv_farrell, .)
+file.path(tidy_wagner, 'abv_types.txt') %>%
+    fwrite(abv_wagner, .)
 ```
 
 ## Balance cell type compositions

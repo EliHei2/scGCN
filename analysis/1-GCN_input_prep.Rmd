@@ -1,0 +1,167 @@
+---
+title: "Prepare Input for InceptionGCN"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<!-- 2020-05-04 17:16 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/1-GCN_input_prep.Rmd-->
+
+
+## Setup
+
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/1-GCN_input_prep.Rmd', view=F, verbose=T, delete_cache=F)
+```
+
+## Load dependencies
+```{r load_packages}
+suppressMessages(source('code/R/dep.R'))
+```
+
+## Initialization and load data
+```{r load_data}
+# initialization
+tidy_farrell   = 'data_tidy/farrell'
+tidy_wagner    = 'data_tidy/wagner'
+output_farrell = 'output/farrell'
+output_wagner  = 'output/wagner'
+# load farrell data
+mtx_farrell    = fread(file.path(tidy_farrell, 'count_matrix.txt')) %>% setkey('GENE')
+abv_farrell    = fread(file.path(tidy_farrell, 'abv_types.txt')) %>% setkey('barcode')
+# load wagner data
+mtx_wagner     = fread(file.path(tidy_wagner, 'count_matrix.txt')) %>% setkey('GENE')
+abv_wagner     = fread(file.path(tidy_wagner, 'abv_types.txt')) %>% setkey('barcode')
+```
+
+## Select types
+```{r umap_prep, message=FALSE, warning=FALSE, paged.print=FALSE}
+abv_types   = intersect(abv_farrell$abv_type, abv_wagner$abv_type)
+abv_farrell = abv_farrell[abv_type %in% abv_types]
+abv_wagner  = abv_wagner[abv_type %in% abv_types]
+cmp_farrell = table(abv_farrell$abv_type)
+cmp_wagner  = table(abv_wagner$abv_type)
+cmp_table   = pmin(cmp_wagner, cmp_farrell)
+cmp_table   = ifelse(cmp_table > 400, cmp_table, 0)
+abv_farrell %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
+abv_wagner  %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
+comp_all    = cbind(names(cmp_farrell), cmp_farrell, cmp_wagner, cmp_table) %>%
+    as.data.table %>%
+    setnames(c('type', 'Farrell', 'Wagner', 'Finall'))
+comp_all
+```
+
+## Prepare input for GGM
+```{r normalize, message=FALSE, warning=FALSE, paged.print=FALSE}
+shared_genes = intersect(mtx_farrell$GENE, mtx_wagner$GENE)
+shared_genes = setdiff(shared_genes, 'dedd1')
+data_farrell = mtx_farrell[shared_genes, .SD, .SDcols=abv_farrell$barcode] %>%
+    as.matrix 
+    # %>%
+    # apply(., 2, rescale)
+rownames(data_farrell) = shared_genes
+data_wagner  = mtx_wagner[shared_genes, .SD, .SDcols=abv_wagner$barcode] %>%
+    as.matrix 
+# data_wagner  =  log2(data_wagner + 1) %>%
+#     apply(., 2, rescale)
+rownames(data_wagner)  = shared_genes
+dim(data_wagner)
+sprintf('farrell, before: %d * %d 
+         farrell, after : %d * %d
+         wagner,  before: %d * %d
+         wagner,  after : %d * %d',
+         dim(mtx_farrell)[1], dim(mtx_farrell)[1],
+         dim(data_farrell)[1], dim(data_farrell)[2],
+         dim(mtx_wagner)[1], dim(mtx_wagner)[1],
+         dim(data_wagner)[1], dim(data_wagner)[2]
+    )
+```
+
+## Select highly variable genes
+```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
+# select higly variable genes
+hvg          = hv_genes(as.matrix(data_wagner), 300)
+hvg          = rownames(data_wagner)[hvg]
+# subset farrell
+data_farrell = t(data_farrell[hvg,])
+const_cols   = which(colSds(as.matrix(data_farrell)) == 0)
+data_farrell %<>% as.data.table() %>% .[, -..const_cols] %>% as.matrix
+# subset wagner
+data_wagner  = t(data_wagner[hvg,])
+```
+
+## The GGM
+```{r ggm, message=FALSE, warning=FALSE, paged.print=FALSE}
+rho = 0.2
+# ggm for wagner
+ggm_wagner = ggm(data.table(data_wagner), rho=rho)
+isolated   = which(degree(ggm_wagner) == 0)
+ggm_wagner = delete.vertices(ggm_wagner, isolated)
+res_wagner = graph_vis(ggm_wagner, plot=T)
+title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+```
+
+## Normalizaiton
+```{r norm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# prepare farrell: scale
+data_farrell %<>% .[, -isolated] %>%
+    apply(., 2, rescale)
+# prepare wagner: log2 + scale
+data_wagner %<>% .[, -isolated]
+data_wagner  =  log2(data_wagner + 1) %>%
+    apply(., 2, rescale)
+```
+
+## UMAPs
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE, fig.height = 3}
+umap_farrell = uwot::umap(data_farrell) 
+abv_farrell[, c('umap1', 'umap2') := list(..umap_farrell[,1], ..umap_farrell[,2])]
+plot_farrell = abv_farrell %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=abv_type) +
+    geom_point(alpha=0.2) +
+    theme_bw() + 
+    theme(axis.text= element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    labs(title='Farrell et al.')
+
+umap_wagner  = uwot::umap(data_wagner) 
+abv_wagner[, c('umap1', 'umap2') := list(..umap_wagner[,1], ..umap_wagner[,2])]
+plot_wagner  = abv_wagner %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=abv_type) +
+    geom_point(alpha = 0.2) +
+    theme_bw() + 
+    theme(axis.text = element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    labs(title='Wagner et al.')
+
+(plot_wagner + plot_farrell) + plot_layout(guides = 'collect')
+``` 
+
+## Save results
+```{r save, message=FALSE, warning=FALSE, paged.print=FALSE}
+file.path('data_tidy', 'ggm_adj_0.15.txt') %>%
+    fwrite(data.table(as.matrix(as_adj(ggm_wagner))), .)
+file.path(tidy_farrell, 'data_farrell.txt') %>%
+    fwrite(data.table(t(data_farrell)), .)
+file.path(tidy_farrell, 'abv_farrell.txt') %>%
+    fwrite(abv_farrell, .)
+file.path(tidy_wagner, 'data_wagner.txt') %>%
+    fwrite(data.table(t(data_wagner)), .)
+file.path(tidy_wagner, 'abv_wagner.txt') %>%
+    fwrite(abv_wagner, .)
+```

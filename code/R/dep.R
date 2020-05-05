@@ -41,13 +41,13 @@ import_cran('devtools')
 cran_packages = c('gRim', 'glasso', 'methods', 'Matrix',
   'igraph', 'graph', 'data.table', 'visNetwork', 'SIN',
   'Rtsne', 'RColorBrewer', 'doParallel', 'reshape2', 'qgraph',
-  'magrittr')
+  'magrittr', 'uwot', 'scales', 'patchwork')
 
 bioc_packages = c('genefilter', 'limma', 'BiocParallel',
   'gRbase', 'RBGL', 'Rgraphviz', 'gRain',
   'scran', 'scater', 'Seurat')
 
-git_packages  = c('bAIo-lab/muvis')
+git_packages  = c('ropenscilabs/umapr')
 
 int_packages  = c('scGCNUtils')
 
