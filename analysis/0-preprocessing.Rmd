@@ -22,7 +22,7 @@ output:
 
 ```{r setup, include = FALSE}
 library('BiocStyle')
-knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='png', cache.lazy = FALSE)
+knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='pdf', cache.lazy = FALSE)
 # wflow_build(files='analysis/0-preprocessing.Rmd', view=F, verbose=T, delete_cache=F, cache.lazy = FALSE)
 ```
 
@@ -160,8 +160,10 @@ mtx_wagner    = mtx_wagner[, c('GENE', ..cells_wagner)]
 hvg                 = hv_genes(as.matrix(mtx_wagner[, -c('GENE')]), 400)
 hvg                 = mtx_wagner[hvg, get('GENE')]
 # subset farrell
-data_farrell        = data.table(t(as.matrix(mtx_farrell[hvg, -c('GENE')])))
-names(data_farrell) = mtx_farrell[hvg, GENE]
+data_farrell        = t(as.matrix(mtx_farrell[hvg, -c('GENE')]))
+data_farrell = 2^(data_farrell) - 1
+colnames(data_farrell) = mtx_farrell[hvg, GENE]
+data_farrell %<>% as.data.table
 const_cols          = which(colSds(as.matrix(data_farrell)) == 0)
 data_farrell %<>% as.data.table() %>% .[, -..const_cols]
 # subset wagner
@@ -185,9 +187,9 @@ res_wagner = graph_vis(ggm_wagner, plot=T)
 title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 ```
 
-#### Farrell, rho = 0.05
-```{r ggm_farrell_0.05_.2}
-rho = 0.05
+#### Farrell, rho = 0.1
+```{r ggm_farrell_0.1_.2}
+rho = 0.1
 # ggm for farrell
 keep_genes = names(V(ggm_wagner))
 ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
@@ -197,9 +199,9 @@ res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isol
 title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 ```
 
-#### Farrell, rho = 0.1
-```{r ggm_farrell_0.1_.2}
-rho = 0.1
+#### Farrell, rho = 0.2
+```{r ggm_farrell_0.2_.2}
+rho = 0.2
 # ggm for farrell
 keep_genes = names(V(ggm_wagner))
 ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
@@ -223,9 +225,9 @@ res_wagner = graph_vis(ggm_wagner, plot=T)
 title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 ```
 
-#### Farrell, rho = 0.05
-```{r ggm_farrell_0.05_.3}
-rho = 0.05
+#### Farrell, rho = 0.1
+```{r ggm_farrell_0.1_.3}
+rho = 0.1
 # ggm for farrell
 keep_genes = names(V(ggm_wagner))
 ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
@@ -235,9 +237,9 @@ res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isol
 title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 ```
 
-#### Farrell, rho = 0.1
-```{r ggm_farrell_0.1_.3}
-rho = 0.1
+#### Farrell, rho = 0.2
+```{r ggm_farrell_0.2_.3}
+rho = 0.2
 # ggm for farrell
 keep_genes = names(V(ggm_wagner))
 ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
