@@ -17,10 +17,9 @@ flags.DEFINE_float('weight_decay', 0., 'Weight for L2 loss on embedding matrix.'
 flags.DEFINE_bool('featureless', False, 'featureless')
 
 
-# base_path = './data/custom_data/'
-train_path = "../../data/nestorowa/proc/"
-test_path = "../../data/nestorowa/proc/"
-adj, num_nodes = load_adj(test_path)
+train_path = 'data_train'
+test_path = "data_tidy/farrell"
+adj, num_nodes = load_adj(train_path)
 train_labels, train_one_hot_labels, train_num_graphs, num_classes, train_nan_idx = load_classes(train_path)
 train_class_dist = [train_labels.tolist().count(i) / train_num_graphs for i in range(num_classes)]
 train_features = load_features(train_path, is_binary=False)

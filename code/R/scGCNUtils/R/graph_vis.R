@@ -120,6 +120,7 @@ graph_vis <- function(graph, directed = F, community = T, betweenness = T, plot 
     if ( directed )
         vs = vs %>% visEdges(arrows="to", smooth=F)
 
+    print('**************')
     if ( plot ) {
         gg = qgraph::qgraph(
             as_adjacency_matrix(ig),

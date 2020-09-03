@@ -1,0 +1,157 @@
+---
+title: "Report: A Geometric Deep Learning Framework for Single-cell Trancriptomics Data Analysis"
+shorttitle: "scGCN report"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zürich, Switzerland
+  email:
+  - eheidari@student.ethz.ch 
+- name: Laleh Haghverdi
+  affiliation: 
+  - EMBL Heidelberg, Germany
+  email: 
+  -  laleh.haghverdi@embl.de
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+abstract: >
+    abstract.
+output:
+    BiocStyle::pdf_document
+bibliography: references.bib
+link-citations: yes
+---
+
+<!-- 2020-05-30 19:23 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/SLF_rugs/analysis/99-report.Rmd-->
+
+
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/0-preprocessing.Rmd', view=F, verbose=T, delete_cache=F, cache.lazy = FALSE)
+```
+
+<!--## Background and motivation
+<!-- # General setting, objectives, and challenges -->
+# Introduction and motivation
+Current single-cell RNA sequencing (scRNA-seq) classification methods use genes expression as independent features to assign cell types, disregarding their interactome which is of great importance in consistency of different cell states. Cell type classification based on a few marker genes, for example, yields better results in intra data set settings where both train and test cells are sampled from the same dataset [@abdelaal2019comparison] and may fail to correctly classify cell types under perturbations when expression of the predefined marker genes varies with respect to the control reference data set . Furthermore, using genes expression as independent features can mask developmental relationships between different cell states and cell types with subtle difference in the gene expression profiles. A representation of cell states on a connected graph of genes in contrast, is more robust to technical variations and can capture cell state relations better, as any cellular transition is governed by a gene regulatory network (Fig. \@ref(fig:schema)).
+
+Considering the modular architecture of gene regulatory networks (GRNs), we propose to further classify and use this information for cell type identification in new data sets. Whereas unwanted variations among different data sets makes any supervised learning method prone to overfitting and dataset specific model artifacts, we suggest that a supervised learning approach on GRNs imposes the proper inductive bias (@baxter2000model, @neyshabur2014search) for 'transferable learning' [@levie2019transferability], such that an available data set can be used to train a model which is able to predict cell types in new (unseen) data sets later on.
+
+```{r schema, message=FALSE, warning=FALSE, paged.print=FALSE, out.height='80%', fig.cap='XXXXcaption' , echo=F}
+knitr::include_graphics('../../output/pbmc_2020_07_26/schema.pdf')
+``` 
+
+Recent advancements of deep learning models to capture modular structures in other applications such as image, audio and speech analysis as well as emergence of high-throughput scRNA-seq technologies which provide the large amounts of data required for such models motivated us to employ deep learning models applicable to non-regular graph data. Amongst such models, which are generally referred to as "geometric deep learning" (@bronstein2017geometric, @monti2017geometric), Graph Convolutional Networks (GCNs) have significant power in extracting informative feature maps from signals defined over nodes of a graph while considering meaningful local structures and connectivities among them. This makes GCNs suitable for our purpose of analyzing non-regular gene networks [@zhou2018graph].
+
+
+<!-- ## single-cell Graph Convolutional Network -->
+To meet the challenges described above, we implement single-cell Graph Convolutional Network (scGCN) which takes gene-gene interactions into account by constructing a co-expression network of a subset of genes and uses a graph deep learning approach to classify single cells. The pipeline is an integrated data flow, with tunable options to achieve the most accurate cell type annotation. Moreover, we provide multiple visualization tools including t-SNE, UMAP^[**t**-distributed **S**tochastic **N**eighbor **E**mbedding (t-SNE)  [@maaten2008visualizing] and **U**niform **M**anifold **A**pproximation and **P**rojection (UMAP) [@mcinnes2018umap] are non-linear methods for dimension reduction, widely used in the fields of machine learning and computatoinal biology.] as well as a few statistical measures at different stages of the model} to facilitate interpretation (Fig. \@ref(fig:abstract)^[**HVG:** highly variable gene, **TF:** transcription factor, **PGM:** probabilistic graphical models]).
+
+<!-- # The solution space -->
+# The scGCN learning framework 
+We propose a deep learning framework for analysis of single-cell RNA-seq data. Our framework consists of three steps; 1) adaptation of a geometric deep learning model applicable to gene regulatory networks (GRNs), 2) construction of a modular GRN, which serves as the input graph structure for the geometric deep learning model, and 3) validation of the model on available scRNA-seq data sets. For each of these steps, we face a multitude of possible methods. We would like to systematically explore the solution space in order to find the best amongst the set of possible solutions. This, brought us to first integrating all steps into one pipeline, and then optimizing the whole pipeline to achieve the best solution.
+
+<!-- ## The pipeline -->
+We designed a pipeline of modules each of which represent a particular functionality. Each module is parametrized to ensure flexibility in trying different methods available for each step. This translates the whole solution space into a parameter grid, where parameters are methods and their arguments. Such an approach enables us to examine different solutions as paths of parameters on the parameter grid. The pipeline has three main modules including 1) preparation of GCN's input, 2) the InceptionGCN and 3) Analysis of results, each of which consist of multiple submodules. In the following we describe each of the modules in detail. 
+
+```{r abstract, message=FALSE, warning=FALSE, paged.print=FALSE, out.height='100%', fig.cap='The graphical abstract of the scGCN.' , echo=F}
+knitr::include_graphics('../../output/pbmc_2020_07_26/graphical_abstract.pdf')
+``` 
+
+## Module 1: prepare GCN's input {.unnumbered}
+After selection of training and test datasets, one has to preprocess them and prepare them to feed them to the GCN module. Preprocessing includes three steps, first, cell type selection and cell-wise data preprocessing, second, gene subset selection and lastly, GRN reconstruction. For each of these steps, we encountered some challenges and define our solution space as follows.
+
+- **Cell type selection & preprocessing:** This stat is straightforward, in that one should select a subset of cell type in the intersection of cell types present in both training and test datasets. Afterwards, data for each cell should be preprocessed to rule out major technical noises. We used a very general method to perform preprocessing, that is cell-wise log scaling, with no tunable parameter. 
+
+- **Gene subset selection:** The main objective for gene subset selection is to select genes which are most relevant to cell type identification. There are multiple ideas discussed in the literature among which we examined networks built on transcription factors (TFs) and networks built on highly variable genes (HVGs). Because of computational limitations, feasible number of genes in the GRN as the input of GCN ranges between 100 and 1000 depending on biological specifications of the data.
+
+- **GRN reconstruction:** There are numerous methods for GRN reconstruction proposed, some of which rely on knowledge bases, such as RegNetwork [@liu2015regnetwork], and some simply use the data itself to estimate the underlying GRNs for the genes in hand, probabilistic graphical models and coexpression networks embody such an approach. With the aim of choosing the best method for our pipeline, we examined both approaches. The most important features of the GRN we were seeking were sparsity and modularity of the GRN.
+
+We sought a GRN representation of single-cell data which we could feed into a GCN to accurately annotate cells types generalizable to new datasets. Due to computational limitations, one has to reconstruct such a GRN of a subset of all expressed genes in the training dataset. Furthermore most of the methods we tried for GRN reconstruction, including knowledge-based or data-based, produced neither modular nor sparse networks and hence turned out not suitable for GCNs application that are inherently designed to exploit local (modular) structures of the input graphs to perform the learning task. 
+
+Overall, while seeking the best way to prepare input data for the GCN among multitude of solutions, we restricted our solution space to the ones which are computationally feasible and potentially enhance the learning efficiency of the GCN the most.
+
+
+## Module 2: the GCN{.unnumbered}
+Among geometric deep learning strategies we decided to use the implementation of the InceptionGCN [@kazi2019graph], a Graph Convolutional Network (GCN) approach that captures a great range of distinct locality sizes on the network, hence suitable for the context of learning on modular gene networks. Moreover, as an instance of a regular GCN, InceptionGCN has a regorous mathematical formulation, by spectral graph theory, hence, interpretable in contrast to most of other geometric deep learning models. The (hyper)parameters of InceptionGCN, e.g., number of layers, number of hidden nodes, and locality sizes should be tuned to find the optimal solution. 
+ \textcolor{red} {XXXX TODO: Add the strategy for dealing with unshared cell types i.e. specific to either the training or the test data. I remember we discussed two possibilities. if not implemented say it, but move to the Discussion section and say remains to be implemented}
+
+## Module 3: validation and interpretation of results{.unnumbered}
+The last module of the pipeline precesses the output of the GCN and tries to interpret them. This is utilized by proper visualizations and computations to evaluate specific measures, such as annotation accuracy, technical noise removal, and computation dynamics. 
+
+# The `scGCNUtils` package
+Once we parametrized our solution space, we implement the pipeline as a software package in R and python. The package `scGCNUtils` [ref] provides the user with the building blocks of the pipeline as well as performing pre-/post- exploratory data analysis (EDA). The user is able to run an end-to-end pipeline by defining their desired parameters, and decide on the ultimate parameter path using EDA tools provided for each module. The package also facilitates benchmarking, in that each step of the pipeline is implemented as an independent module and can be tweaked or substituted by another module with the same functionality. In the end, the performance and efficiency of the path can be validated by the package. Logging and caching are added to the package for the same purpose.  
+
+Ever since the beginning of the project, we reformatted the implementation from scratch quite a few times. For each dataset, we had to implement an ad-hoc pipeline, as different labs publish their studies in different formats, besides using different scRNA-seq platforms. We had to integrate new datasets into specific data objects in our programming environment, and pass them through a pipeline, specifically tailored for the dataset in hand. Eventually, we decided to develop a package to automate everything for the user. We integrated all of the tools we had exploited throughout the project into a single end-to-end pipeline, in which one can set specific parameters to validate the parameter path optimality. Also, each input experiment is stored in a specific data object in the environment with certain features and attributes which are modified in the pipeline data flow step by step. The whole pipeline is optimized in memory and performance by using appropriate data structures and computational resource optimization. Integrating everything into one single package also facilitates benchmarking, as now carrying out new experiments are made as convenient as reparametrization of the pipeline. 
+
+The package is designed to meet state of the art reproducibility standards and criteria of open science, such as coherence, integrity, documentation, readability, and testability.
+
+# Experiments and results
+We examined the functionality of our framework on several datasets, e.g., [@paul2015transcriptional], @nestorowa2016single], and [@cao2019single]. The following path turned out to be the optimal for all most all of our experiments.
+
+1. **Cell subset selection:** Select a balanced subset of cells from the training dataset, with respect to the cell types (at least 500 cells from each cell type). Select cells from the same cell types, from the test dataset.
+2. **Gene subset selection:** Subset both datasets to the genes which are highly variable in the training dataset (at most 1000 genes).
+3. **GRN reconstruction:** Use the glasso algorithm ^[A PGM to construct sparse Graphical Models [@friedman2008sparse].] and tune its parameters to reconstruct the GRN on the training dataset.
+4. **Cell type classification:** Employ InceptionGCN and tune its hyper parameters (dependent on the input dataset), to achieve the optimal classification.
+
+However, the nature of each dataset essentially determines the best path. Therefore, for a new dataset multiple paths should be explored.
+
+## The PBMC datasets
+The pivotal application of our method is transferring (generalizing) a learned model to new datasets in which overcoming intra-dataset variations, e.g., batch effects is of great importance. Thus, we sought to find two dataset with the same cell type profile, but acquired in separate experiments to inspect how well our method is able to overcome unwanted variations. Here, we present an application of the scGCN on two human peripheral blood mononuclear cell (PBMC) scRNA-seq experiments [@ding2019systematic]. The dataset contains two separate experiments, hereafter called PBMC 1 and PBMC 2, generated in a single center, but employing seven different scRNA-seq methods. This suits our goal to verify our framework on a simulated task of real transfer learning. As in potential applications we expect our method to learn annotation priorly on a complete dataset and transfer the learned model to annotate an unseen one. 
+
+### Input
+We take PBMC 1 as our training dataset and PBMC 2 as our test dataset. The task is to learn the model on PBMC 1, and validate it on PBMC 2, by predicting cell type annotations, and comparing them to true labels. We select a subset of size 4 of cell types, to carry out our computational experiment. Afterwards, a subset of 300 most highly variable genes is selected from PBMC 1 and PBMC 2 is subset to the same set of genes. For GRN reconstruction, we use the glasso algorithm with tuned parameters, which gives us a modular as well as sparse GRN. The GRN is presented in Fig. \@ref(fig:graphs). 
+
+```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE, out.width='150%', fig.cap='The learned GRNs. (A) and (B) GRNs learned on PBMC 1 and PBMC 2 respectively. Colors indicate network communities based on PBMC 1, with the louvain [@blondel2008fast] algorithm. (C) Average gene expressions for each class on the GRN learned from PBMC 1, visualized for PBMC 1 and PBMC 2.', echo=F}
+knitr::include_graphics('../../output/pbmc_2020_07_26/graphs_all.pdf')
+``` 
+
+Fig. \@ref(fig:graphs)(A) and Fig. \@ref(fig:graphs)(B) indicate that although our GRN reconstruction method is based on data and no prior knowledge, it is robust across datasets. As one finds in the figures, the network communities from PBMC 1, perfectly transfer to PBMC 2. Fig. \@ref(fig:graphs)(C) illustrates the same observation, as the density of expressions, i.e., activated modules are the same for both datasets, for each cell type. In fact, such an observation motivated us for the whole idea of exploiting a network topology to classify cell types.
+
+### Classification with InceptionGCN  
+We implement an InceptionGCN with three hidden layers with 36, 18, and 9 hidden nodes, respectively. At each layer, a complex, non-linear transformation (Chebnet filters) are applied to the inputs (see Fig. \@ref(fig:abstract)). One can describe such operations as diffusing information along the input GRN which further facilitates an accurate classification. Our InceptionGCN gives an accuracy of 90% on test dataset, which is rather a very high accuracy in a transfer learning task, specifically, when the classes are quite similar to each other (including two classes of T cells). Fig. \@ref(fig:confs) indicates the results of the classification on training and test datasets. 
+
+```{r confs, message=FALSE, warning=FALSE, paged.print=FALSE, out.width='70%', fig.cap='The confusion matrices of the classification. Each (table) cell indicates the number of respective (biological) cells.', echo=F}
+knitr::include_graphics('../../output/pbmc_2020_07_26/conf_hm.pdf')
+``` 
+
+### Analysis of the results
+
+We achieve 92 and 90 label prediction accuracy on the training and test data sets respectively. This is a significant result demonstrating the transferable learning capabilities of scGCN on a test data set which has been collected in a different experiment than that used for training the model. \textcolor{red} {TODO: For comparison we, include classification results from a standard deep learning neural net XXX which has yields the high accuracy level of XX on the training data sets, but its accuracy drops to XX on the test data set.}
+As mentioned before, one of our objectives in the design of the single-cell geometrical deep learning framework has been interpretability. Our framework enables us to explore the learning procedure in our deep neural network. Our design facilitates representation learning ^[**Representation learning** is learning representations of the data by transforming or projections into repetitively simpler spaces [@bengio2013representation].], in that one can visualize the data at the hidden layers and observe the trajectory of data passing through the complex transformations, done by the InceptionGCN. This gives an overview of the learning procedure, inspecting batch-effect removal, and heterogeneous cell populations being separated. One can also use the same information to study the trajectory of expression density along the GRN, for each class. This gives one an idea of how information diffuses on the network and utilizes the classification task. Fig. \@ref(fig:umaps) represents an embedding trajectory analysis, visualized as UMAPs. As indicated, we observe gradual batch-effect removal and cluster separation along the layers. \textcolor{red}{TODO: later on we can also add other quantitative and statistical measures for these, e.g. entropy of batch mixing.}
+
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE, out.width='120%', fig.cap='UMAPs of the raw and hidden embeddings.', echo=F}
+knitr::include_graphics('../../output/pbmc_2020_07_26/layer_umaps_2020_07_26.pdf')
+``` 
+
+# Discussion and future steps
+
+- LH: compare with a standard deep learning model
+- LH: use the scGCN framework for new metric definition to resolve subtle cell types relationships (e.g. in development)
+- LH: showing results on other data sets
+- LH: application to other NGS single cell data types, e.g. cell type classification for scATAC-seq data
+- LH: transfer learning between scRNA-seq and ATAC-seq data
+- LH: the zebrafish data sets
+
++ EL: look at the expression densities (like fig2) on graphs of a known phylogeny of cells, to asses fig1. 
++ EL: investigate gene communities (modules) and find biologically relevant results. (module X is known to be active in Cell type Y)
+
+\newpage
+<!-- # Acknowledgments {.unnumbered} -->
+
+
+# Code and data availability {.unnumbered}
+
+- Code: [GitHub repository](https://github.com/EliHei2/scGCN) 
+- PBMC dataset: [link](https://singlecell.broadinstitute.org/single_cell/study/SCP424/single-cell-comparison-pbmc-data)
+
+<!-- # Appendix {.unnumbered}
+## Glossary {.unnumbered}
+- **Fluency:** in cognitive sciences and its related fields the concept of 'fluency' refers to 'the subjective experience of ease' with which people undergo a cognitive situation, e.g., processing fluency (ease of processing information), perception fluency (ease of perceptual processing), and retrieval fluencey (ease of retrieving information) [@alter2009uniting].
+- **Desirable difficulty:** certain difficulties introduced into the learning process which can greatly improve long-term retention of the learned material [@bjork1994memory].
+- **Metacognition:** one's knowledge about their own cognitive processes, or roughly, 'thinking about thinking' [@flavell1976metacognitive].
+- **Judgment of learning:** the assessment one makes about how well they have learned and predictions about how well they will remember the learned information [@son2005judgments]. -->
+\newpage
+# References {-}

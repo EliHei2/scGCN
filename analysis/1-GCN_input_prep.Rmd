@@ -27,141 +27,222 @@ knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
 # wflow_build(files='analysis/1-GCN_input_prep.Rmd', view=F, verbose=T, delete_cache=F)
 ```
 
-## Load dependencies
-```{r load_packages}
+
+## Initialization and imports
+```{r init_import}
+# imports
 suppressMessages(source('code/R/dep.R'))
+# initialization
+tidy_wagner    = 'data_tidy/wagner'
+output_wagner  = 'output/wagner'
+tidy_farrell   = 'data_tidy/farrell'
+output_farrell = 'output/farrell'
+time_stamp     = format(Sys.Date(), '%Y_%m_%d')
+data_input     = sprintf('data_input/zebrafish_%s', time_stamp)
+dir.create(data_input)
+## penalization parameters
+rho_1 = 0.15
+rho_2 = 0.15
+# dirs
+## read
+mtx_wagner_f   = file.path(tidy_wagner, 'count_matrix.txt')
+meta_wagner_f  = file.path(tidy_wagner, 'abv_types.txt')
+mtx_farrell_f  = file.path(tidy_farrell, 'count_matrix.txt')
+meta_farrell_f = file.path(tidy_farrell, 'abv_types.txt')
+## write
+### analysis data
+wi_wagner_f  = file.path(tidy_wagner, sprintf('wi_adj_wagner_%s_%s.txt', rho_wagner, time_stamp))
+comm_dt_1_f  = file.path(tidy_wagner, sprintf('gene_communities_wagner_%s_%s.txt', rho_wagner, time_stamp))
+wi_farrell_f = file.path(tidy_farrell, sprintf('wi_adj_farrell_%s_%s.txt', rho_farrell, time_stamp))
+comm_dt_2_f  = file.path(tidy_farrell, sprintf('gene_communities_farrell_%s_%s.txt', rho_farrell, time_stamp))
+### train data
+adj_f     = file.path(data_input, 'adj.txt')
+train_X_f = file.path(data_input, 'data_train.txt')
+train_y_f = file.path(data_input, 'classes_train.txt')
+test_X_f  = file.path(data_input, 'data_test.txt')
+test_y_f  = file.path(data_input, 'classes_test.txt')
 ```
 
-## Initialization and load data
-```{r load_data}
-# initialization
-tidy_farrell   = 'data_tidy/farrell'
-tidy_wagner    = 'data_tidy/wagner'
-output_farrell = 'output/farrell'
-output_wagner  = 'output/wagner'
-# load farrell data
-mtx_farrell    = fread(file.path(tidy_farrell, 'count_matrix.txt')) %>% setkey('GENE')
-abv_farrell    = fread(file.path(tidy_farrell, 'abv_types.txt')) %>% setkey('barcode')
-# load wagner data
-mtx_wagner     = fread(file.path(tidy_wagner, 'count_matrix.txt')) %>% setkey('GENE')
-abv_wagner     = fread(file.path(tidy_wagner, 'abv_types.txt')) %>% setkey('barcode')
+## Load input data
+```{r load_input, message=FALSE, warning=FALSE, paged.print=FALSE}
+counts_mtx_1 = mtx_wagner_f %>% fread
+genes_1        = counts_mtx_1$GENE
+counts_mtx_1 %<>% .[,.SD, .SDcols=-'GENE'] %>% as.matrix
+rownames(counts_mtx_1) = genes_1
+cell_meta_1  = meta_wagner_f %>% fread %>% setkey('barcode') %>% setnames('abv_type', 'cell_type')
+gc()
+counts_mtx_2 = mtx_farrell_f %>% fread 
+genes_2        = counts_mtx_2$GENE
+counts_mtx_2 %<>% .[,.SD, .SDcols=-'GENE'] %>% as.matrix
+rownames(counts_mtx_2) = genes_2
+cell_meta_2  = meta_farrell_f %>% fread %>% setkey('barcode') %>% setnames('abv_type', 'cell_type')
+gc()
+genes = intersect(genes_1, genes_2)
+counts_mtx_1 %<>% .[genes,]
+counts_mtx_2 %<>% .[genes,]
+# clean up
+gc()
 ```
 
 ## Select types
-```{r umap_prep, message=FALSE, warning=FALSE, paged.print=FALSE}
-abv_types   = intersect(abv_farrell$abv_type, abv_wagner$abv_type)
-abv_farrell = abv_farrell[abv_type %in% abv_types]
-abv_wagner  = abv_wagner[abv_type %in% abv_types]
-cmp_farrell = table(abv_farrell$abv_type)
-cmp_wagner  = table(abv_wagner$abv_type)
-cmp_table   = pmin(cmp_wagner, cmp_farrell)
-cmp_table   = ifelse(cmp_table > 400, cmp_table, 0)
-abv_farrell %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
-abv_wagner  %<>% .[, .SD[sample(1:dim(.SD)[1], ..cmp_table[abv_type])], by = 'abv_type']
-comp_all    = cbind(names(cmp_farrell), cmp_farrell, cmp_wagner, cmp_table) %>%
+```{r subset_cells, message=FALSE, warning=FALSE, paged.print=FALSE}
+# compute cell type frequencies
+cmp_1 = table(cell_meta_1$cell_type)
+cmp_2 = table(cell_meta_2$cell_type)
+# Select cell types with > 2000 samples within dataset 1
+# cmp_1 = ifelse(cmp_1 > 1000, cmp_1, 0)
+# meta_sub_1 = cell_meta_1  %>%
+#     .[, .SD[sample(1:dim(.SD)[1], min(1500, ..cmp_1[cell_type]))], by = 'cell_type']
+# meta_sub_2 = cell_meta_2 %>%
+#     .[, .SD[sample(1:dim(.SD)[1],
+#     min(..cmp_2[cell_type], ..cmp_2[cell_type]*..cmp_1[cell_type]))], by = 'cell_type']
+# cmp_1 = table(meta_sub_1$cell_type)
+# cmp_2 = table(meta_sub_2$cell_type)
+# comp_all  = cbind(names(cmp_1), cmp_1, cmp_2) %>%
+#     as.data.table %>%
+#     setnames(c('type', 'data_train', 'data_test'))
+# comp_all
+# manual selection
+cell_types = c('adaxi', 'mesod', 'epide', 'spina')
+meta_sub_1 = cell_meta_1[cell_type %in% cell_types] %>% .[, .SD[sample(1:dim(.SD)[1], min(500, ..cmp_1[cell_type]))], by = 'cell_type']
+meta_sub_2 = cell_meta_2[cell_type %in% cell_types] %>% .[, .SD[sample(1:dim(.SD)[1], min(500, ..cmp_2[cell_type]))], by = 'cell_type']
+cmp_1 = table(meta_sub_1$cell_type)
+cmp_2 = table(meta_sub_2$cell_type)
+comp_all  = cbind(names(cmp_1), cmp_1, cmp_2) %>%
     as.data.table %>%
-    setnames(c('type', 'Farrell', 'Wagner', 'Finall'))
+    setnames(c('type', 'data_train', 'data_test'))
 comp_all
+# subset count matrix based on cell types
+counts_mtx_1 %<>% .[, meta_sub_1$barcode]
+counts_mtx_2 %<>% .[, meta_sub_2$barcode]
+# clean up
+gc()
 ```
 
-## Prepare input for GGM
-```{r normalize, message=FALSE, warning=FALSE, paged.print=FALSE}
-shared_genes = intersect(mtx_farrell$GENE, mtx_wagner$GENE)
-shared_genes = setdiff(shared_genes, 'dedd1')
-data_farrell = mtx_farrell[shared_genes, .SD, .SDcols=abv_farrell$barcode] %>%
-    as.matrix 
-    # %>%
-    # apply(., 2, rescale)
-rownames(data_farrell) = shared_genes
-data_wagner  = mtx_wagner[shared_genes, .SD, .SDcols=abv_wagner$barcode] %>%
-    as.matrix 
-# data_wagner  =  log2(data_wagner + 1) %>%
-#     apply(., 2, rescale)
-rownames(data_wagner)  = shared_genes
-dim(data_wagner)
-sprintf('farrell, before: %d * %d 
-         farrell, after : %d * %d
-         wagner,  before: %d * %d
-         wagner,  after : %d * %d',
-         dim(mtx_farrell)[1], dim(mtx_farrell)[1],
-         dim(data_farrell)[1], dim(data_farrell)[2],
-         dim(mtx_wagner)[1], dim(mtx_wagner)[1],
-         dim(data_wagner)[1], dim(data_wagner)[2]
-    )
+## Normalizaiton
+```{r norm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# +1 --> log2 --> 0-1 rescale (cells)
+to.rm_1    = which(rowSums(counts_mtx_1) == 0)
+to.rm_2    = which(rowSums(counts_mtx_2) == 0)
+to.rm_row  = union(to.rm_1, to.rm_2)
+# to.rm_1    = which(colSums(counts_mtx_1) == 0)
+# to.rm_2    = which(colSums(counts_mtx_2) == 0)
+norm_mtx_1 = counts_mtx_1[-to.rm_row, ] %>% `+`(1) %>% log2 %>% apply(., 2, rescale)
+norm_mtx_2 = counts_mtx_2[-to.rm_row, ] %>% `+`(1) %>% apply(., 2, rescale)
+# clean up
+gc()
 ```
 
 ## Select highly variable genes
 ```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
 # select higly variable genes
-hvg          = hv_genes(as.matrix(data_wagner), 300)
-hvg          = rownames(data_wagner)[hvg]
-# subset farrell
-data_farrell = t(data_farrell[hvg,])
-const_cols   = which(colSds(as.matrix(data_farrell)) == 0)
-data_farrell %<>% as.data.table() %>% .[, -..const_cols] %>% as.matrix
-# subset wagner
-data_wagner  = t(data_wagner[hvg,])
+gene_vars_1 = modelGeneVar(as.matrix(norm_mtx_1))
+hvg1 = getTopHVGs(gene_vars_1) %>% .[1:500]
+gene_vars_2 = modelGeneVar(as.matrix(norm_mtx_2))
+hvg2 = getTopHVGs(gene_vars_2) %>% .[1:500]
+hvg  = intersect(hvg1, hvg2)
+# subset 2: genes
+data_2 = t(norm_mtx_2[hvg,])
+const_cols = which(colSds(as.matrix(data_2)) == 0)
+data_2 %<>% as.data.table %>% .[, -..const_cols] 
+# subset 1: genes
+data_1 = t(norm_mtx_1[hvg,])
+data_1 %<>% as.data.table %>% .[, -..const_cols]
+# remove redundant objects
+# clean up
+gc() 
 ```
 
-## The GGM
+## The GGM 
 ```{r ggm, message=FALSE, warning=FALSE, paged.print=FALSE}
-rho = 0.2
-# ggm for wagner
-ggm_wagner = ggm(data.table(data_wagner), rho=rho)
-isolated   = which(degree(ggm_wagner) == 0)
-ggm_wagner = delete.vertices(ggm_wagner, isolated)
-res_wagner = graph_vis(ggm_wagner, plot=T)
-title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+#  1
+## penalization parameter
+ggm_1   = ggm(data_1, rho=0.15, threshold = 0.1)
+## exclude isolated nodes
+graph_1 = ggm_1$graph
+isolated_1  = which(degree(graph_1) == 0)
+graph_1 = delete.vertices(graph_1, isolated_1)
+## graph weights
+wi_1    = ggm_1$model$wi %>% .[-isolated_1, -isolated_1]
+colnames(wi_1) = rownames(wi_1) = names(V(graph_1))
+diag(wi_1) = 0
+## visualize graph
+res_1   = graph_vis(graph_1, plot=T)
+title('Training dataset', line=2.5, sub=sprintf('gLasso, rho = %s', rho_1))
+## extract graph communities
+comm_1  = res_1$communities
+comm_dt_1   = data.table(GENE=names(comm_1), community=comm_1) %>%
+    setkey(community)
+#  2
+## construct ggm
+keep_genes  = names(V(graph_1))
+ggm_2   = ggm(data_2[, ..keep_genes], rho=rho_2, threshold = .07)
+## exclude isolated nodes
+graph_2 = ggm_2$graph
+isolated_2  = which(degree(graph_2)==0)
+graph_2 = delete.vertices(graph_2, isolated_2)
+## graph weights
+wi_2    = ggm_2$model$wi %>% .[-isolated_2, -isolated_2]
+diag(wi_2) = 0
+colnames(wi_2) = rownames(wi_2) = names(V(graph_2))
+## visualize graph
+res_2   = graph_vis(graph_2, plot=T, groups=res_1$communities[-isolated_2])
+title('Test dataset', line=2.5, sub=sprintf('gLasso, rho = %s', rho_2))
+## extract graph communities
+comm_2  = res_2$communities
+comm_dt_2   = data.table(GENE=names(comm_2), community=comm_2) %>%
+    setkey(community)
+# subset data: exclude isolated genes
+data_1 %<>% as.matrix %>% .[, -isolated_1] 
+data_2 %<>% as.matrix %>% .[, -isolated_1]
 ```
 
-## Normalizaiton
-```{r norm, message=FALSE, warning=FALSE, paged.print=FALSE}
-# prepare farrell: scale
-data_farrell %<>% .[, -isolated] %>%
-    apply(., 2, rescale)
-# prepare wagner: log2 + scale
-data_wagner %<>% .[, -isolated]
-data_wagner  =  log2(data_wagner + 1) %>%
-    apply(., 2, rescale)
-```
+
 
 ## UMAPs
-```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE, fig.height = 3}
-umap_farrell = uwot::umap(data_farrell) 
-abv_farrell[, c('umap1', 'umap2') := list(..umap_farrell[,1], ..umap_farrell[,2])]
-plot_farrell = abv_farrell %>%
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE}
+# pbmc1
+umap_1 = uwot::umap(data_1) 
+meta_sub_1[, c('umap1', 'umap2') := list(..umap_1[,1], ..umap_1[,2])]
+plot_1 = meta_sub_1 %>%
     ggplot(.) +
-    aes(umap1, umap2, color=abv_type) +
+    aes(umap1, umap2, color=cell_type) +
     geom_point(alpha=0.2) +
     theme_bw() + 
     theme(axis.text= element_blank()) +
     scale_color_brewer(palette="Dark2") +
-    labs(title='Farrell et al.')
-
-umap_wagner  = uwot::umap(data_wagner) 
-abv_wagner[, c('umap1', 'umap2') := list(..umap_wagner[,1], ..umap_wagner[,2])]
-plot_wagner  = abv_wagner %>%
+    labs(title='Wagner et al.')
+# 2 
+umap_2  = uwot::umap(data_2) 
+meta_sub_2[, c('umap1', 'umap2') := list(..umap_2[,1], ..umap_2[,2])]
+plot_2  = meta_sub_2 %>%
     ggplot(.) +
-    aes(umap1, umap2, color=abv_type) +
+    aes(umap1, umap2, color=cell_type) +
     geom_point(alpha = 0.2) +
     theme_bw() + 
     theme(axis.text = element_blank()) +
     scale_color_brewer(palette="Dark2") +
-    labs(title='Wagner et al.')
-
-(plot_wagner + plot_farrell) + plot_layout(guides = 'collect')
+    # scale_fill_manual(colorRampPalette(brewer.pal(12, "Accent"))(12)) +
+    labs(title='Farell et al.')
+# draw
+(plot_1 + plot_2) + plot_layout(guides = 'collect')
 ``` 
 
 ## Save results
 ```{r save, message=FALSE, warning=FALSE, paged.print=FALSE}
-file.path('data_tidy', 'ggm_adj_0.15.txt') %>%
-    fwrite(data.table(as.matrix(as_adj(ggm_wagner))), .)
-file.path(tidy_farrell, 'data_farrell.txt') %>%
-    fwrite(data.table(t(data_farrell)), .)
-file.path(tidy_farrell, 'abv_farrell.txt') %>%
-    fwrite(abv_farrell, .)
-file.path(tidy_wagner, 'data_wagner.txt') %>%
-    fwrite(data.table(t(data_wagner)), .)
-file.path(tidy_wagner, 'abv_wagner.txt') %>%
-    fwrite(abv_wagner, .)
+# analysis data
+## pbmc 1
+wi_wagner_f  %>% fwrite(wi_1, .)
+comm_dt_1_f %>% fwrite(comm_dt_1, .)
+## pbmc2
+wi_farrell_f  %>% fwrite(wi_2, .)
+comm_dt_2_f %>% fwrite(comm_dt_2, .)
+# train & test data
+adj_f     %>% fwrite(data.table(abs(wi_1)), .)
+order_train = order(meta_sub_1$cell_type)
+train_X_f %>% fwrite(data.table(t(data_1[order_train,])), .)
+train_y_f %>% fwrite(meta_sub_1[order_train], .)
+order_test  = order(meta_sub_2$cell_type)
+test_X_f  %>% fwrite(data.table(t(data_2[order_test,])), .)
+test_y_f  %>% fwrite(meta_sub_2[order_test,], .)
 ```

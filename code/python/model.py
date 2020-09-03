@@ -103,6 +103,7 @@ class Model(object):
         self._loss()
         self._accuracy()
         self.opt_op = self.optimizer.minimize(self.loss)
+        # self.summ = tf.summary.merge_all()
 
     def predict(self):
         pass
@@ -119,10 +120,10 @@ class Model(object):
         if by_time or path is None:
             now = datetime.now()
             now_time = now.time()
-            model_path = "./saved_models/" + str(now.date()) + "_" \
+            model_path = "./models/" + str(now.date()) + "_" \
                          + str(now_time.hour) + ":" + str(now_time.minute) + ":" + str(now_time.second)
         else:
-            model_path = os.path.join("./saved_models/", path)
+            model_path = os.path.join("./models/", path)
         os.mkdir(path=model_path)
         save_path = saver.save(sess, os.path.join(model_path, "{}.ckpt".format(self.name)))
         print("Model saved in path: %s" % save_path)
@@ -151,12 +152,13 @@ class SimpleGCN(Model):
         # Weight decay loss
         for var in self.layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
-
         self.loss += self.placeholders['weight'] * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        # tf.summary.scalar('loss', self.loss)
 
     def _accuracy(self):
         correct_prediction = tf.equal(tf.argmax(self.outputs, 1), tf.argmax(self.placeholders['labels']))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, dtype=tf.float32))
+        # tf.summary.scalar('acc', self.accuracy)
 
     def _build(self):
         self.layers.append(GraphConvolution(input_dim=self.input_dim,
@@ -208,12 +210,13 @@ class CheybyGCN(Model):
         # Weight decay loss
         for var in self.layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
-
         self.loss += self.placeholders['weight'] * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        # tf.summary.scalar('loss', self.loss)
 
     def _accuracy(self):
         correct_prediction = tf.equal(tf.argmax(self.outputs, 1), tf.argmax(self.placeholders['labels']))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, dtype=tf.float32))
+        # tf.summary.scalar('acc', self.accuracy)
 
     def _build(self):
         self.layers.append(GraphConvolution(input_dim=self.input_dim,
@@ -222,28 +225,32 @@ class CheybyGCN(Model):
                                             act=tf.nn.relu,
                                             dropout=True,
                                             sparse_inputs=True,
-                                            locality=self.locality[0]))
+                                            locality=self.locality[0],
+                                            name='GC1'))
 
         self.layers.append(GraphConvolution(input_dim=FLAGS.hidden1,
                                             output_dim=FLAGS.hidden2,
                                             placeholders=self.placeholders,
                                             act=tf.nn.relu,
                                             dropout=True,
-                                            locality=self.locality[1]))
+                                            locality=self.locality[1],
+                                            name='GC2'))
 
         self.layers.append(GraphConvolution(input_dim=FLAGS.hidden2,
                                             output_dim=FLAGS.hidden3,
                                             placeholders=self.placeholders,
                                             act=tf.nn.relu,
                                             dropout=True,
-                                            locality=self.locality[2]))
+                                            locality=self.locality[2],
+                                            name='GC3'))
 
-        self.layers.append(SumLayer())
+        self.layers.append(SumLayer(name='sum_layer'))
         self.layers.append(Dense(input_dim=FLAGS.hidden3,
                                  output_dim=self.num_class,
                                  placeholders=self.placeholders,
                                  dropout=True,
-                                 act=lambda x: x))
+                                 act=lambda x: x,
+                                 name='dense_layer'))
 
     def predict(self):
         return tf.argmax(self.outputs, 1)
@@ -266,13 +273,14 @@ class InceptionGCN(Model):
         # Weight decay loss
         for var in self.layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
-
         self.loss += self.placeholders['weight'] * tf.reduce_mean(
             tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        # tf.summary.scalar('loss', self.loss)
 
     def _accuracy(self):
         correct_prediction = tf.equal(tf.argmax(self.outputs, 1), tf.argmax(self.placeholders['labels']))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, dtype=tf.float32))
+        # tf.summary.scalar('acc', self.accuracy)
 
     def _build(self):
         # convolutional layer 1
@@ -284,7 +292,8 @@ class InceptionGCN(Model):
                                        dropout=True,
                                        sparse_inputs=True,
                                        logging=self.logging,
-                                       is_pool=self.is_pool))
+                                       is_pool=self.is_pool,
+                                       name='IGC1'))
 
         # changing input dim and output dim of layer 1 in different cases of pooling types
         if not self.is_pool:
@@ -303,7 +312,8 @@ class InceptionGCN(Model):
                                        dropout=True,
                                        sparse_inputs=False,
                                        logging=self.logging,
-                                       is_pool=self.is_pool))
+                                       is_pool=self.is_pool,
+                                       name='IGC2'))
 
         # changing input dim and output dim of layer 2 in different cases of having skip connections and pooling types
         if not self.is_pool:
@@ -322,9 +332,10 @@ class InceptionGCN(Model):
                                        dropout=True,
                                        sparse_inputs=False,
                                        logging=self.logging,
-                                       is_pool=self.is_pool))
+                                       is_pool=self.is_pool,
+                                       name='IGC3'))
 
-        self.layers.append(SumLayer())
+        self.layers.append(SumLayer(name='sum_layer'))
         # last dense layer for predicting classes
         self.layers.append(Dense(input_dim=l3_output_size,
                                  output_dim=self.num_class,
@@ -332,7 +343,8 @@ class InceptionGCN(Model):
                                  dropout=False,
                                  sparse_inputs=False,
                                  act=lambda x: x,
-                                 bias=True))
+                                 bias=True,
+                                 name='dense_layer'))
 
     def predict(self):
         return tf.nn.softmax(self.outputs)

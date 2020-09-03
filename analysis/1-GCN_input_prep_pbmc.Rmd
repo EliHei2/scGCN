@@ -1,0 +1,284 @@
+---
+title: "Preprocessing Zebrafish Datasets"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<!-- 2020-06-12 22:41 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/1-GCN_input_prep_pbmc.Rmd-->
+
+## Setup
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/1-GCN_input_prep_pbmc.Rmd', view=F, verbose=T, delete_cache=F)
+```
+
+## Initialization and imports
+```{r init_import}
+# imports
+suppressMessages(source('code/R/dep.R'))
+# initialization
+data_raw   = 'data_raw/pbmc'
+data_tidy  = 'data_tidy/pbmc'
+out_dir    = 'output/pbmc'
+time_stamp = format(Sys.Date(), '%Y_%m_%d')
+data_input = sprintf('data_input/pbmc_%s', time_stamp)
+dir.create(data_input)
+## penalization parameters
+rho_pbmc1 = 0.1
+rho_pbmc2 = 0.1
+# dirs
+## read
+counts_mtx_f = file.path(data_raw, 'counts.read.txt')
+cell_names_f = file.path(data_raw, 'cells.read.new.txt')
+gene_names_f = file.path(data_raw, 'genes.read.txt')
+cell_meta_f  = file.path(data_raw, 'meta.txt')
+## write
+### analysis data
+wi_pbmc1_f  = file.path(data_tidy, sprintf('wi_adj_pbmc1_%s_%s.txt', rho_pbmc1, time_stamp))
+comm_dt_1_f = file.path(data_tidy, sprintf('gene_communities_pbmc1_%s_%s.txt', rho_pbmc1, time_stamp))
+wi_pbmc2_f  = file.path(data_tidy, sprintf('wi_adj_pbmc2_%s_%s.txt', rho_pbmc2, time_stamp))
+comm_dt_2_f = file.path(data_tidy, sprintf('gene_communities_pbmc2_%s_%s.txt', rho_pbmc2, time_stamp))
+### train data
+adj_f     = file.path(data_input, 'adj.txt')
+train_X_f = file.path(data_input, 'data_train.txt')
+train_y_f = file.path(data_input, 'classes_train.txt')
+test_X_f  = file.path(data_input, 'data_test.txt')
+test_y_f  = file.path(data_input, 'classes_test.txt')
+### output
+graph_pbmc1_f = file.path(out_dir, sprintf('graph_pbmc1_%s.pdf', time_stamp))
+graph_pbmc2_f = file.path(out_dir, sprintf('graph_pbmc2_%s.pdf', time_stamp))
+```
+
+## Load input data
+```{r load_input, message=FALSE, warning=FALSE, paged.print=FALSE}
+cell_types = c('B cell', 'CD14+ monocyte', 'CD4+ T cell', 'Megakaryocyte', 
+    'Natural killer cell', 'Dendritic cell', 'Cytotoxic T cell', 'CD16+ monocyte')
+# cell metadata
+cell_meta    = cell_meta_f %>% fread %>% .[-1] %>% setnames('CellType', 'cell_type') %>%
+    .[nGene > 1000 & percent.mito < .1]  %>%
+    .[cell_type %in% cell_types] %>%
+    .[grep('10x', Method), Method := '10x Chromium']
+cell_meta_1  = cell_meta[Experiment == 'pbmc1']
+cell_meta_2  = cell_meta[Experiment == 'pbmc2']
+# count matrix
+counts_mtx = counts_mtx_f %>% readMM
+cell_names = cell_names_f %>% fread(header=F) %>% .$V1
+gene_names = gene_names_f %>% fread(header=F) %>% .$V1
+dimnames(counts_mtx) = list(gene_names, cell_names)
+counts_mtx %<>% .[rowSums(.) > 100, ]
+rownames(counts_mtx) %<>% limma::strsplit2(., '_') %>% .[,2] %>% tolower
+# clean up
+gc()
+```
+
+## Select cell types
+```{r select, message=FALSE, warning=FALSE, paged.print=FALSE}
+# compute cell type frequencies
+cmp_pbmc1 = table(cell_meta_1$cell_type)
+cmp_pbmc2 = table(cell_meta_2$cell_type)
+# Select cell types with > 2000 samples within pbmc 1
+cmp_pbmc1 = ifelse(cmp_pbmc1 > 150, cmp_pbmc1, 0)
+# cmp_pbmc1['CD14+ monocyte'] = 0
+meta_sub_1 = cell_meta_1  %>%
+    .[, .SD[sample(1:dim(.SD)[1], min(150, ..cmp_pbmc1[cell_type]))], by = 'cell_type']
+meta_sub_2 = cell_meta_2 %>%
+    .[, .SD[sample(1:dim(.SD)[1],
+    min(..cmp_pbmc2[cell_type], ..cmp_pbmc2[cell_type]*..cmp_pbmc1[cell_type]))], by = 'cell_type']
+cmp_pbmc1 = table(meta_sub_1$cell_type)
+cmp_pbmc2 = table(meta_sub_2$cell_type)
+comp_all  = cbind(names(cmp_pbmc1), cmp_pbmc1, cmp_pbmc2) %>%
+    as.data.table %>%
+    setnames(c('type', 'pbmc1', 'pbmc2'))
+comp_all
+
+cmp_pbmc1 = table(meta_sub_1$Method)
+cmp_pbmc2 = table(meta_sub_2$Method)
+comp_all  = cbind(names(cmp_pbmc1), cmp_pbmc1, cmp_pbmc2) %>%
+    as.data.table %>%
+    setnames(c('method', 'pbmc1', 'pbmc2'))
+comp_all
+# subset count matrix based on cell types
+counts_mtx_1 = counts_mtx %>% .[, meta_sub_1$NAME]
+counts_mtx_2 = counts_mtx %>% .[, meta_sub_2$NAME]
+# remove redundant objects
+rm(counts_mtx)
+rm(cell_meta)
+# clean up
+gc()
+```
+
+<!-- ```{r hetmaps_1, message=FALSE, warning=FALSE, paged.print=FALSE}
+hm_comp = comp_all %>% melt(., id.vars='type') %>%
+    ggplot +
+    aes(x=variable, y=type, fill=as.numeric(value)) +
+    geom_tile() +
+    theme_bw() +
+    scale_fill_viridis(discrete=FALSE) 
+
+comp_all %>% ggplot +
+    aes()
+``` -->
+
+
+## Normalizaiton
+```{r norm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# +1 --> log2 --> 0-1 rescale (cells)
+norm_mtx_1 = counts_mtx_1 %>% `+`(1) %>% log2 %>% apply(., 2, rescale)
+norm_mtx_2 = counts_mtx_2 %>% `+`(1) %>% log2 %>% apply(., 2, rescale)
+# clean up
+gc()
+```
+
+## Select highly variable genes
+```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
+# select higly variable genes
+gene_vars_1 = modelGeneVar(as.matrix(norm_mtx_1))
+hvg1 = getTopHVGs(gene_vars_1) %>% .[1:1000]
+gene_vars_2 = modelGeneVar(as.matrix(norm_mtx_2))
+hvg2 = getTopHVGs(gene_vars_2) %>% .[1:1000]
+hvg  = intersect(hvg1, hvg2)
+# subset pbmc2: genes
+data_pbmc2 = t(norm_mtx_2[hvg,])
+const_cols = which(colSds(as.matrix(data_pbmc2)) == 0)
+data_pbmc2 %<>% as.data.table %>% .[, -..const_cols] 
+# subset pbmc1: genes
+data_pbmc1 = t(norm_mtx_1[hvg,])
+data_pbmc1 %<>% as.data.table %>% .[, -..const_cols]
+# remove redundant objects
+rm(norm_mtx_1)
+rm(norm_mtx_2)
+# clean up
+gc() 
+```
+
+## Select highly variable genes
+```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
+# # select higly variable genes
+# gene_vars_1 = rowSds(as.matrix(norm_mtx_1))/(rowMeans(norm_mtx_1) + 1)
+# hvg = sort(gene_vars_1, decreasing=T) %>% .[1:400] %>% names
+# # subset pbmc2: genes
+# data_pbmc2 = t(norm_mtx_2[hvg,])
+# const_cols = which(colSds(as.matrix(data_pbmc2)) == 0)
+# data_pbmc2 %<>% as.data.table %>% .[, -..const_cols] 
+# # subset pbmc1: genes
+# data_pbmc1 = t(norm_mtx_1[hvg,])
+# data_pbmc1 %<>% as.data.table %>% .[, -..const_cols]
+# # remove redundant objects
+# rm(norm_mtx_1)
+# rm(norm_mtx_2)
+# # clean up
+# gc() 
+```
+
+## The GGM 
+```{r ggm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# pbmc 1
+## penalization parameter
+ggm_pbmc1   = ggm(data_pbmc1, rho=0.15, threshold = .05)
+## exclude isolated nodes
+graph_pbmc1 = ggm_pbmc1$graph
+isolated_1  = which(degree(graph_pbmc1) == 0)
+graph_pbmc1 = delete.vertices(graph_pbmc1, isolated_1)
+## graph weights
+wi_pbmc1    = ggm_pbmc1$model$wi %>% .[-isolated_1, -isolated_1]
+colnames(wi_pbmc1) = rownames(wi_pbmc1) = names(V(graph_pbmc1))
+diag(wi_pbmc1) = 0
+## visualize graph
+# graph_pbmc1_f %>% pdf(width=5, height=5)
+res_pbmc1   = graph_vis(graph_pbmc1, plot=T)
+title('(A) PBMC 1', line=2.5, sub=sprintf('gLasso, rho = %s', rho_pbmc1))
+# dev.off()
+## extract graph communities
+comm_pbmc1  = res_pbmc1$communities
+comm_dt_1   = data.table(GENE=names(comm_pbmc1), community=comm_pbmc1) %>%
+    setkey(community)
+# pbmc 2
+## construct ggm
+keep_genes  = names(V(graph_pbmc1))
+ggm_pbmc2   = ggm(data_pbmc2[, ..keep_genes], rho=rho_pbmc2, threshold = .07)
+## exclude isolated nodes
+graph_pbmc2 = ggm_pbmc2$graph
+isolated_2  = which(degree(graph_pbmc2)==0)
+graph_pbmc2 = delete.vertices(graph_pbmc2, isolated_2)
+## graph weights
+wi_pbmc2    = ggm_pbmc2$model$wi %>% .[-isolated_2, -isolated_2]
+diag(wi_pbmc2) = 0
+colnames(wi_pbmc2) = rownames(wi_pbmc2) = names(V(graph_pbmc2))
+## visualize graph
+# graph_pbmc2_f %>% pdf(width=5, height=5)
+res_pbmc2   = graph_vis(graph_pbmc2, plot=T, groups=res_pbmc1$communities[-isolated_2])
+title('(B) PBMC 2', line=2.5, sub=sprintf('gLasso, rho = %s', rho_pbmc2))
+# dev.off()
+## extract graph communities
+comm_pbmc2  = res_pbmc2$communities
+comm_dt_2   = data.table(GENE=names(comm_pbmc2), community=comm_pbmc2) %>%
+    setkey(community)
+# subset data: exclude isolated genes
+data_pbmc1 %<>% as.matrix %>% .[, -isolated_1] 
+data_pbmc2 %<>% as.matrix %>% .[, -isolated_1]
+```
+<!-- ```{r graph_comp, message=FALSE, warning=FALSE, paged.p rint=FALSE}
+adj_1 = ifelse(wi_pbmc1 != 0, 1, 0) 
+adj_2 = ifelse(wi_pbmc2 != 0, 1, 0) 
+``` -->
+
+## UMAPs
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE}
+# pbmc1
+umap_pbmc1 = uwot::umap(data_pbmc1) 
+meta_sub_1[, c('umap1', 'umap2') := list(..umap_pbmc1[,1], ..umap_pbmc1[,2])]
+plot_pbmc1 = meta_sub_1 %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=cell_type) +
+    geom_point(alpha=0.2) +
+    theme_bw() + 
+    theme(axis.text= element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    labs(title='pbmc1 et al.')
+# pbmc2 
+umap_pbmc2  = uwot::umap(data_pbmc2) 
+meta_sub_2[, c('umap1', 'umap2') := list(..umap_pbmc2[,1], ..umap_pbmc2[,2])]
+plot_pbmc2  = meta_sub_2 %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=cell_type) +
+    geom_point(alpha = 0.2) +
+    theme_bw() + 
+    theme(axis.text = element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    # scale_fill_manual(colorRampPalette(brewer.pal(12, "Accent"))(12)) +
+    labs(title='pbmc2 et al.')
+# draw
+(plot_pbmc2 + plot_pbmc1) + plot_layout(guides = 'collect')
+``` 
+
+## Save results
+```{r save, message=FALSE, warning=FALSE, paged.print=FALSE}
+# analysis data
+## pbmc 1
+wi_pbmc1_f  %>% fwrite(wi_pbmc1, .)
+comm_dt_1_f %>% fwrite(comm_dt_1, .)
+## pbmc2
+wi_pbmc2_f  %>% fwrite(wi_pbmc2, .)
+comm_dt_2_f %>% fwrite(comm_dt_2, .)
+# train & test data
+adj_f     %>% fwrite(data.table(ifelse(abs(wi_pbmc1) > 0.1, 1, 0)), .)
+order_train = order(meta_sub_1$cell_type)
+train_X_f %>% fwrite(data.table(t(data_pbmc1[order_train,])), .)
+train_y_f %>% fwrite(meta_sub_1[order_train], .)
+order_test  = order(meta_sub_2$cell_type)
+test_X_f  %>% fwrite(data.table(t(data_pbmc2[order_test,])), .)
+test_y_f  %>% fwrite(meta_sub_2[order_test,], .)
+```

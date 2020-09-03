@@ -1,0 +1,128 @@
+---
+title: "Preprocessing Zebrafish Datasets"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<!-- 2020-09-01 09:55 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/03-final-report-2020-09-01.rmd-->
+
+## Setup
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/1-GCN_input_prep_pbmc.Rmd', view=F, verbose=T, delete_cache=F)
+```
+
+## Initialization and imports
+```{r init_import}
+# imports
+suppressMessages(source('code/R/dep.R'))
+# initialization
+data_input = 'data_input/pbmc_2020_09_01'
+data_tidy  = 'data_tidy/pbmc'
+model_dir  = 'models/pbmc_2020_09_01/models/pbmc'
+out_dir    = 'output/pbmc_2020_09_01'
+time_stamp = format(Sys.Date(), '%Y_%m_%d')
+# dirs
+## input data
+train_X_f = file.path(data_input, 'data_train.txt')
+train_y_f = file.path(data_input, 'classes_train.txt')
+test_X_f  = file.path(data_input, 'data_test.txt')
+test_y_f  = file.path(data_input, 'classes_test.txt')
+## labels
+train_idx_f = file.path(data_input, 'train_idx_superCT.txt')
+test_idx_f  = file.path(data_input, 'test_idx_superCT.txt')
+## node embeddings
+train_layers_f = file.path(model_dir, 'train_layer_')
+test_layers_f  = file.path(model_dir, 'test_layer_')
+## write
+### plots
+umap_out  = file.path(out_dir, sprintf('layer_umaps_%s.pdf', time_stamp))
+# conf_out  = file.path(out_dir, sprintf('conf_%s.pdf', time_stamp))
+```
+
+## Load input data
+```{r read, message=FALSE, warning=FALSE, paged.print=FALSE}
+# data train
+train_idx = train_idx_f %>% fread %>% .$V1 %>% `+`(1)
+test_idx  = test_idx_f %>% fread %>% .$V1 %>% `+`(1)
+
+train_X   = train_X_f %>% fread %>% as.matrix %>% t %>% .[train_idx,]
+train_y   = train_y_f %>% fread %>% .[train_idx] 
+test_X    = test_X_f %>% fread %>% as.matrix %>% t %>% .[test_idx,]
+test_y    = test_y_f %>% fread %>% .[test_idx] 
+
+# node embeddings
+train_layers = 1:2 %>% 
+    map(~ fread(sprintf('%s%s_FC.csv', train_layers_f, .x), header=T)) %>%
+    map(~ t(as.matrix(.x[, -1]))) 
+test_layers  = 1:2 %>% 
+    map(~ fread(sprintf('%s%s_FC.csv', test_layers_f, .x), header=T)) %>%
+    map(~ t(as.matrix(.x[, -1])))
+
+```
+
+
+## UMAPs
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE}
+plot_umap <- function(mtx, cell_types, datasets, batches, title){
+    umap_df = uwot::umap(mtx) 
+    umap_dt = data.table(dataset=factor(datasets), 
+                         cell_type=factor(cell_types), 
+                         batch=factor(batches),
+                         umap1=umap_df[,1], umap2=umap_df[,2]) 
+    type_umap = umap_dt %>%
+        ggplot +
+        aes(umap1, umap2, color=cell_type, shape=dataset, size=dataset, pch=10, colour='black') +
+        geom_point() +
+        theme_bw() + 
+        theme(axis.text= element_blank()) +
+        scale_color_brewer(palette='Dark2') +
+        scale_shape_manual(values = c(1, 4)) +
+        labs(title=title, x='', y='')
+    batch_umap = umap_dt %>%
+        ggplot +
+        aes(umap1, umap2, color=batch, shape=dataset, size=dataset, pch=10) +
+        geom_point() +
+        theme_bw() + 
+        theme(axis.text= element_blank()) +
+        scale_color_brewer(palette='Set3') +
+        scale_shape_manual(values = c(1, 4)) +
+        labs(title='', x='', y='')
+    list(type=type_umap, batch=batch_umap)
+}
+
+raw_layer  = rbind(train_X, test_X)
+sub_idx    = sample(1:dim(raw_layer)[1], 1000)
+# sub_idx    = 1:dim(raw_layer)[1]
+cell_types = c(train_y$cell_type, test_y$cell_type)[sub_idx]
+batches    = c(train_y$Method, test_y$Method)[sub_idx]
+datasets   = c(rep('training', dim(train_X)[1]), rep('test', dim(test_X)[1]))[sub_idx]
+umap_raw   = list(plot_umap(raw_layer[sub_idx,], cell_types, datasets, batches, 'raw data'))
+
+raw_layer  = list(rbind(train_X, test_X))
+layers = 1:2 %>% map(~rbind(train_layers[[.x]], test_layers[[.x]]))
+umaps  = 1:2 %>% map(~ plot_umap(layers[[.x]][sub_idx,], cell_types, datasets, batches, paste('layer', .x)))
+umaps  = append(umap_raw, umaps)
+umap_plt    =  (umaps[[1]]$type + umaps[[2]]$type + umaps[[3]]$type  +
+    umaps[[1]]$batch + umaps[[2]]$batch + umaps[[3]]$batch) +
+    plot_layout(guides = 'collect', nrow=2)
+```
+
+## Save results
+```{r name, message=FALSE, warning=FALSE, paged.print=FALSE}
+umap_out %>% ggsave(umap_plt, filename=., width=15, height=7, device='pdf')
+conf_out %>% ggsave(conf_hm, filename=., width=10, height=5, device='pdf')
+```

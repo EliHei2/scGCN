@@ -1,7 +1,3 @@
-<!-- 2020-04-17 17:13 -->
-<!-- elihei  [<eheidari@student.ethz.ch>]-->
-<!--/Volumes/Projects/scGCN/analysis/0-preprocessing.Rmd-->
-
 ---
 title: "Preprocessing Zebrafish Datasets"
 author:
@@ -18,11 +14,17 @@ output:
     number_sections: false
 ---
 
+<!-- 2020-04-17 17:13 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/0-preprocessing.Rmd-->
+
+
+
 ## Setup
 
 ```{r setup, include = FALSE}
 library('BiocStyle')
-knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='pdf', cache.lazy = FALSE)
+knitr::opts_chunk$set(autodep=TRUE, cache=TRUE, dev='png', cache.lazy = FALSE)
 # wflow_build(files='analysis/0-preprocessing.Rmd', view=F, verbose=T, delete_cache=F, cache.lazy = FALSE)
 ```
 
@@ -161,6 +163,7 @@ hvg                 = hv_genes(as.matrix(mtx_wagner[, -c('GENE')]), 400)
 hvg                 = mtx_wagner[hvg, get('GENE')]
 # subset farrell
 data_farrell        = t(as.matrix(mtx_farrell[hvg, -c('GENE')]))
+## convert farrell to raw
 data_farrell = 2^(data_farrell) - 1
 colnames(data_farrell) = mtx_farrell[hvg, GENE]
 data_farrell %<>% as.data.table
@@ -178,37 +181,77 @@ names(data_wagner)  = mtx_wagner[hvg, GENE]
 
 #### Wagner
 ```{r ggm_wagner_0.2}
-rho = 0.2
+rho_wagner = 0.2
 # ggm for wagner
-ggm_wagner = ggm(data_wagner, rho=rho)
-isolated  = which(degree(ggm_wagner) == 0)
-ggm_wagner = delete.vertices(ggm_wagner, isolated)
-res_wagner = graph_vis(ggm_wagner, plot=T)
-title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+ggm_wagner   = ggm(data_wagner, rho=rho_wagner)
+# visualize graph
+graph_wagner = ggm_wagner$graph
+isolated     = which(degree(graph_wagner) == 0)
+graph_wagner = delete.vertices(graph_wagner, isolated)
+res_wagner   = graph_vis(graph_wagner, plot=T)
+title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_wagner))
+# save results
+## adj matrix
+wi_wagner    = ggm_wagner$model$wi %>% .[-isolated, -isolated]
+colnames(wi_wagner) = rownames(wi_wagner) = names(V(graph_wagner))
+file.path(tidy_wagner, sprintf('wi_adj_%s.txt', rho_wagner)) %>%
+    fwrite(wi_wagner, .)
+## gene communities
+comm_wagner  = res_wagner$communities
+comm_wag_dt  = data.table(GENE=names(comm_wagner), community=comm_wagner) %>%
+    setkey(community)
+file.path(tidy_wagner, sprintf('gene_communities_%s.txt', rho_wagner)) %>%
+    fwrite(comm_wag_dt, .)
 ```
 
 #### Farrell, rho = 0.1
 ```{r ggm_farrell_0.1_.2}
-rho = 0.1
+rho_farrell = 0.1
 # ggm for farrell
-keep_genes = names(V(ggm_wagner))
-ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
-isolated  = which(degree(ggm_farrell)==0)
-ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
-title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+keep_genes    = names(V(graph_wagner))
+ggm_farrell   = ggm(data_farrell[, ..keep_genes], rho=rho_farrell)
+graph_farrell = ggm_farrell$graph
+isolated      = which(degree(graph_farrell)==0)
+graph_farrell = delete.vertices(graph_farrell, isolated)
+res_farrell   = graph_vis(graph_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_farrell))
+# save results
+## adj matrix
+wi_farrell    = ggm_farrell$model$wi %>% .[-isolated, -isolated]
+colnames(wi_farrell) = rownames(wi_farrell) = names(V(graph_farrell))
+file.path(tidy_farrell, sprintf('wi_adj_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(wi_farrell, .)
+## gene communities
+comm_farrell  = res_farrell$communities
+comm_farr_dt  = data.table(GENE=names(comm_farrell), community=comm_farrell) %>%
+    setkey(community)
+file.path(tidy_farrell, sprintf('gene_communities_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(comm_farr_dt, .)
 ```
 
 #### Farrell, rho = 0.2
 ```{r ggm_farrell_0.2_.2}
-rho = 0.2
+rho_farrell = 0.2
 # ggm for farrell
-keep_genes = names(V(ggm_wagner))
-ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
-isolated  = which(degree(ggm_farrell)==0)
-ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
-title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+keep_genes    = names(V(graph_wagner))
+ggm_farrell   = ggm(data_farrell[, ..keep_genes], rho=rho_farrell)
+graph_farrell = ggm_farrell$graph
+isolated      = which(degree(graph_farrell)==0)
+graph_farrell = delete.vertices(graph_farrell, isolated)
+res_farrell   = graph_vis(graph_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_farrell))
+# save results
+## adj matrix
+wi_farrell    = ggm_farrell$model$wi %>% .[-isolated, -isolated]
+colnames(wi_farrell) = rownames(wi_farrell) = names(V(graph_farrell))
+file.path(tidy_farrell, sprintf('wi_adj_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(wi_farrell, .)
+## gene communities
+comm_farrell  = res_farrell$communities
+comm_farr_dt  = data.table(GENE=names(comm_farrell), community=comm_farrell) %>%
+    setkey(community)
+file.path(tidy_farrell, sprintf('gene_communities_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(comm_farr_dt, .)
 ```
 
 
@@ -216,37 +259,77 @@ title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
 
 #### Wagner
 ```{r ggm_wagner_0.3}
-rho = 0.3
+rho_wagner = 0.3
 # ggm for wagner
-ggm_wagner = ggm(data_wagner, rho=rho)
-isolated  = which(degree(ggm_wagner) == 0)
-ggm_wagner = delete.vertices(ggm_wagner, isolated)
-res_wagner = graph_vis(ggm_wagner, plot=T)
-title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+ggm_wagner   = ggm(data_wagner, rho=rho_wagner)
+# visualize graph
+graph_wagner = ggm_wagner$graph
+isolated     = which(degree(graph_wagner) == 0)
+graph_wagner = delete.vertices(graph_wagner, isolated)
+res_wagner   = graph_vis(graph_wagner, plot=T)
+title('Wagner et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_wagner))
+# save results
+## adj matrix
+wi_wagner    = ggm_wagner$model$wi %>% .[-isolated, -isolated]
+colnames(wi_wagner) = rownames(wi_wagner) = names(V(graph_wagner))
+file.path(tidy_wagner, sprintf('wi_adj_%s.txt', rho_wagner)) %>%
+    fwrite(wi_wagner, .)
+## gene communities
+comm_wagner  = res_wagner$communities
+comm_wag_dt  = data.table(GENE=names(comm_wagner), community=comm_wagner) %>%
+    setkey(community)
+file.path(tidy_wagner, sprintf('gene_communities_%s.txt', rho_wagner)) %>%
+    fwrite(comm_wag_dt, .)
 ```
 
 #### Farrell, rho = 0.1
 ```{r ggm_farrell_0.1_.3}
-rho = 0.1
+rho_farrell = 0.1
 # ggm for farrell
-keep_genes = names(V(ggm_wagner))
-ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
-isolated  = which(degree(ggm_farrell)==0)
-ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
-title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+keep_genes    = names(V(graph_wagner))
+ggm_farrell   = ggm(data_farrell[, ..keep_genes], rho=rho_farrell)
+graph_farrell = ggm_farrell$graph
+isolated      = which(degree(graph_farrell)==0)
+graph_farrell = delete.vertices(graph_farrell, isolated)
+res_farrell   = graph_vis(graph_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_farrell))
+# save results
+## adj matrix
+wi_farrell    = ggm_farrell$model$wi %>% .[-isolated, -isolated]
+colnames(wi_farrell) = rownames(wi_farrell) = names(V(graph_farrell))
+file.path(tidy_farrell, sprintf('wi_adj_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(wi_farrell, .)
+## gene communities
+comm_farrell  = res_farrell$communities
+comm_farr_dt  = data.table(GENE=names(comm_farrell), community=comm_farrell) %>%
+    setkey(community)
+file.path(tidy_farrell, sprintf('gene_communities_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(comm_farr_dt, .)
 ```
 
 #### Farrell, rho = 0.2
 ```{r ggm_farrell_0.2_.3}
-rho = 0.2
+rho_farrell = 0.2
 # ggm for farrell
-keep_genes = names(V(ggm_wagner))
-ggm_farrell = ggm(data_farrell[, ..keep_genes], rho=rho)
-isolated  = which(degree(ggm_farrell)==0)
-ggm_farrell = delete.vertices(ggm_farrell, isolated)
-res_farrell = graph_vis(ggm_farrell, plot=T, groups=res_wagner$communities[-isolated])
-title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho))
+keep_genes    = names(V(graph_wagner))
+ggm_farrell   = ggm(data_farrell[, ..keep_genes], rho=rho_farrell)
+graph_farrell = ggm_farrell$graph
+isolated      = which(degree(graph_farrell)==0)
+graph_farrell = delete.vertices(graph_farrell, isolated)
+res_farrell   = graph_vis(graph_farrell, plot=T, groups=res_wagner$communities[-isolated])
+title('Farrell et. al.', line=2.5, sub=sprintf('gLasso, rho = %s', rho_farrell))
+# save results
+## adj matrix
+wi_farrell    = ggm_farrell$model$wi %>% .[-isolated, -isolated]
+colnames(wi_farrell) = rownames(wi_farrell) = names(V(graph_farrell))
+file.path(tidy_farrell, sprintf('wi_adj_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(wi_farrell, .)
+## gene communities
+comm_farrell  = res_farrell$communities
+comm_farr_dt  = data.table(GENE=names(comm_farrell), community=comm_farrell) %>%
+    setkey(community)
+file.path(tidy_farrell, sprintf('gene_communities_%s_%s.txt', rho_farrell, rho_wagner)) %>%
+    fwrite(comm_farr_dt, .)
 ```
 
 ## Session Info

@@ -104,7 +104,7 @@ ggm <- function(data, methods = c('glasso'), ...) {
     g_models     = g_models %>% map(as, 'igraph')
     commonedges  = do.call(igraph::intersection, g_models)
 
-    commonedges
+    list(graph = commonedges, model = res.lasso)
 }
 
 

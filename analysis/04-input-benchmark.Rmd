@@ -1,0 +1,163 @@
+---
+title: "Preprocessing Zebrafish Datasets"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<!-- 2020-06-12 22:41 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/1-GCN_input_prep_pbmc.Rmd-->
+
+## Setup
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/1-GCN_input_prep_pbmc.Rmd', view=F, verbose=T, delete_cache=F)
+```
+
+
+## Initialization and imports
+```{r init_import}
+# imports
+suppressMessages(source('code/R/dep.R'))
+# initialization
+data_raw   = 'data_raw/pbmc'
+data_tidy  = 'data_tidy/pbmc'
+out_dir    = 'output/pbmc'
+time_stamp = format(Sys.Date(), '%Y_%m_%d')
+data_input = sprintf('data_input/pbmc_%s', time_stamp)
+dir.create(data_input)
+## penalization parameters
+rho_pbmc1 = 0.1
+rho_pbmc2 = 0.1
+# dirs
+## read
+counts_mtx_f = file.path(data_raw, 'counts.read.txt')
+cell_names_f = file.path(data_raw, 'cells.read.new.txt')
+gene_names_f = file.path(data_raw, 'genes.read.txt')
+cell_meta_f  = file.path(data_raw, 'meta.txt')
+## write
+### train data
+adj_f       = file.path(data_input, '%s/adj.txt')
+train_X_f   = file.path(data_input, '%s/data_train.txt')
+train_y_f   = file.path(data_input, '%s/classes_train.txt')
+test_X_f    = file.path(data_input, '%s/data_test.txt')
+test_y_f    = file.path(data_input, '%s/classes_test.txt')
+comm_dt_1_f = file.path(data_input, '%s/gene_communities.txt')
+```
+
+## Load input data
+```{r load_input, message=FALSE, warning=FALSE, paged.print=FALSE}
+cell_types = c('B cell', 'CD14+ monocyte', 'CD4+ T cell', 'Megakaryocyte', 'Natural killer cell')
+# cell metadata
+cell_meta    = cell_meta_f %>% fread %>% .[-1] %>% setnames('CellType', 'cell_type') %>%
+    .[nGene > 1000 & percent.mito < .1] %>%
+    .[cell_type %in% cell_types]
+    # .[grep('monocyte', cell_type), cell_type := 'monocyte'] %>%
+    # .[grep('T cell', cell_type), cell_type := 'T cell']
+cell_meta_1  = cell_meta[Experiment == 'pbmc1']
+cell_meta_2  = cell_meta[Experiment == 'pbmc2']
+# count matrix
+counts_mtx = counts_mtx_f %>% readMM 
+cell_names = cell_names_f %>% fread(header=F) %>% .$V1
+gene_names = gene_names_f %>% fread(header=F) %>% .$V1
+dimnames(counts_mtx) = list(gene_names, cell_names)
+counts_mtx %<>% .[rowSums(.) > 100, ]
+rownames(counts_mtx) %<>% limma::strsplit2(., '_') %>% .[,2] %>% tolower
+# clean up
+gc()
+```
+
+## Select cell types
+```{r select, message=FALSE, warning=FALSE, paged.print=FALSE}
+set.seed(1996)
+make_batch <- function(n_cells=1000, balanced=TRUE){
+    tag = sprintf('n_%s_%s', n_cells, balanced)
+    file.path(data_input, tag) %>% dir.create
+    # compute cell type frequencies
+    cmp_pbmc1 = table(cell_meta_1$cell_type)
+    cmp_pbmc2 = table(cell_meta_2$cell_type)
+    # Select cell types with > 2000 samples within pbmc 1
+    cmp_pbmc1 = ifelse(cmp_pbmc1 > n_cells, cmp_pbmc1, 0)
+    # cmp_pbmc1['CD14+ monocyte'] = 0
+    if(balanced){
+        meta_sub_1 = cell_meta_1  %>%
+            .[, .SD[sample(1:dim(.SD)[1], 
+            min(n_cells, ..cmp_pbmc1[cell_type]))], by = 'cell_type']
+    }else
+        meta_sub_1 = cell_meta_1  %>%
+            .[, .SD[sample(1:dim(.SD)[1], ..cmp_pbmc1[cell_type])], by = 'cell_type']
+
+    meta_sub_2 = cell_meta_2 %>%
+        .[, .SD[sample(1:dim(.SD)[1],
+        min(..cmp_pbmc2[cell_type], ..cmp_pbmc2[cell_type]*..cmp_pbmc1[cell_type]))], by = 'cell_type']
+    cmp_pbmc1 = table(meta_sub_1$cell_type)
+    cmp_pbmc2 = table(meta_sub_2$cell_type)
+    comp_all  = cbind(names(cmp_pbmc1), cmp_pbmc1, cmp_pbmc2) %>%
+        as.data.table %>%
+        setnames(c('type', 'pbmc1', 'pbmc2'))
+    print(comp_all)
+    # subset count matrix based on cell types
+    counts_mtx_1 = counts_mtx %>% .[, meta_sub_1$NAME] %>% `+`(1) %>% log2 
+    # %>% apply(., 2, rescale)
+    counts_mtx_2 = counts_mtx %>% .[, meta_sub_2$NAME] %>% `+`(1) %>% log2 
+    # %>% apply(., 2, rescale)
+    # select higly variable genes
+    # gene_vars_1 = modelGeneVar(as.matrix(counts_mtx_1))
+    # hvg1 = getTopHVGs(gene_vars_1) %>% .[1:700]
+    # gene_vars_2 = modelGeneVar(as.matrix(counts_mtx_2))
+    # hvg2 = getTopHVGs(gene_vars_2) %>% .[1:700]
+    # hvg  = intersect(hvg1, hvg2)
+    gene_vars = modelGeneVar(as.matrix(counts_mtx))
+    hvg = getTopHVGs(gene_vars) %>% .[1:100]
+    hvg %<>% .[1:min(length(hvg), (dim(counts_mtx_1)[2]/2))]
+    # subset pbmc2: genes
+    data_pbmc2 = t(counts_mtx_2[hvg,])
+    const_cols = which(colSds(as.matrix(data_pbmc2)) == 0)
+    data_pbmc2 %<>% as.data.table %>% .[, -..const_cols] 
+    # subset pbmc1: genes
+    data_pbmc1 = t(counts_mtx_1[hvg,])
+    data_pbmc1 %<>% as.data.table %>% .[, -..const_cols]
+    gc() 
+    # pbmc 1
+    ## penalization parameter
+    ggm_pbmc1   = ggm(data_pbmc1, rho=0.07, threshold = .07)
+    ## exclude isolated nodes
+    graph_pbmc1 = ggm_pbmc1$graph
+    isolated_1  = which(degree(graph_pbmc1) == 0)
+    graph_pbmc1 = delete.vertices(graph_pbmc1, isolated_1)
+    res_1   = graph_vis(graph_pbmc1, plot=T)
+    ## extract graph communities
+    comm_1  = res_1$communities
+    comm_dt_1   = data.table(GENE=names(comm_1), community=comm_1) %>%
+        setkey(community)
+    ## graph weights
+    wi_pbmc1    = ggm_pbmc1$model$wi %>% .[-isolated_1, -isolated_1]
+    colnames(wi_pbmc1) = rownames(wi_pbmc1) = names(V(graph_pbmc1))
+    diag(wi_pbmc1) = 0
+    data_pbmc1 %<>% as.matrix %>% .[, -isolated_1] 
+    data_pbmc2 %<>% as.matrix %>% .[, -isolated_1]
+    #save results
+    sprintf(adj_f, tag) %>% fwrite(data.table(abs(wi_pbmc1)), .)
+    order_train = order(meta_sub_1$cell_type)
+    sprintf(train_X_f, tag) %>% fwrite(data.table(t(data_pbmc1[order_train,])), .)
+    sprintf(train_y_f, tag) %>% fwrite(meta_sub_1[order_train], .)
+    order_test  = order(meta_sub_2$cell_type)
+    sprintf(test_X_f, tag)  %>% fwrite(data.table(t(data_pbmc2[order_test,])), .)
+    sprintf(test_y_f, tag) %>% fwrite(meta_sub_2[order_test,], .)
+    sprintf(comm_dt_1_f, tag) %>% fwrite(comm_dt_1, .)
+}
+c(150) %>% 
+    mclapply(function(y) c(TRUE) %>% map(~make_batch(y, .x)), mc.cores=2)
+
+```

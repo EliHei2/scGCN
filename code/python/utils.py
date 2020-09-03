@@ -27,7 +27,6 @@ def sparse_to_tuple(sparse_mx):
             sparse_mx[i] = to_tuple(sparse_mx[i])
     else:
         sparse_mx = to_tuple(sparse_mx)
-
     return sparse_mx
 
 
@@ -48,12 +47,14 @@ def normalize_adj(adj):
     d_inv_sqrt = np.power(rowsum, -0.5).flatten()
     d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
     d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
+    print(adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo())
     return adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt).tocoo()
 
 
 def preprocess_adj(adj):
     """Preprocessing of adjacency matrix for simple GCN model and conversion to tuple representation."""
     adj_normalized = normalize_adj(adj + sp.eye(adj.shape[0]))
+    print(sparse_to_tuple(adj_normalized))
     return sparse_to_tuple(adj_normalized)
 
 
@@ -115,7 +116,31 @@ def node_representations(support, sparse_features, one_hot_labels, placeholders,
     #     layer_embeddings[:, j, :] /= class_num_instance[j]
     for layer in range(num_layers):
         embedding_df = pd.DataFrame(data=layer_embeddings[layer, :, :].T)
-        embedding_df.to_csv('./data/' + file_name + '_layer_{}.csv'.format(layer + 1))
+        embedding_df.to_csv('./models/pbmc/' + file_name + '_layer_{}.csv'.format(layer + 1))
+
+def node_rep_fc(features, labels, weights, activations, file_name):
+    sess = tf.get_default_session()
+    num_graphs = labels.shape[0]
+    num_nodes  = features.shape[1]
+    num_layers = 2
+    input_features = tf.placeholder(shape=[None, num_nodes], dtype=tf.float32)
+    sample_weights = tf.placeholder(shape=[None,], dtype=tf.float32)
+    input_labels = tf.placeholder(shape=[None,], dtype=tf.int64)
+    layer_embeddings = np.zeros((num_layers, num_graphs, num_nodes))
+    for i in range(num_graphs):
+        print(i)
+        print(labels[i:(i+1)].shape)
+        # print(weights[i:(i+1)].shape)
+        print(features[i:(i+1)].shape)
+        feed_dict = dict()
+        feed_dict.update({input_features: features[i:(i+1)], input_labels: labels[i:(i+1)], sample_weights: weights[i:(i+1)]})
+        graph_embeddings = sess.run(activations[1:1 + num_layers], feed_dict=feed_dict)
+        for layer in range(num_layers):
+            layer_embeddings[layer, i, :] += np.mean(graph_embeddings[layer], axis=-1)
+
+    for layer in range(num_layers):
+        embedding_df = pd.DataFrame(data=layer_embeddings[layer, :, :].T)
+        embedding_df.to_csv('./models/pbmc/' + file_name + '_layer_{}_FC.csv'.format(layer + 1))
 
 
 def visualize_graph(adj, activations, num_sample, layout=None):
