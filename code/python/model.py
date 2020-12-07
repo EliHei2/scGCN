@@ -6,7 +6,6 @@ import os
 def dense_model(input_features, hidden_dims, out_dim, model_name,
                 weight_initializer=tf.glorot_uniform_initializer(),
                 bias_initializer=tf.zeros_initializer(), dropout=True, act=tf.nn.relu):
-
     input_dim = int(input_features.shape[1])
     hidden_dims.append(out_dim)
     n_hidden = len(hidden_dims)
@@ -22,7 +21,7 @@ def dense_model(input_features, hidden_dims, out_dim, model_name,
         )
         biases.update(
             {'b_0': tf.get_variable(name='b_0',
-                                    shape=[hidden_dims[0],],
+                                    shape=[hidden_dims[0], ],
                                     initializer=bias_initializer)}
         )
         for i in range(1, n_hidden):
@@ -152,7 +151,8 @@ class SimpleGCN(Model):
         # Weight decay loss
         for var in self.layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
-        self.loss += self.placeholders['weight'] * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        self.loss += self.placeholders['weight'] * tf.reduce_mean(
+            tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
         # tf.summary.scalar('loss', self.loss)
 
     def _accuracy(self):
@@ -210,7 +210,8 @@ class CheybyGCN(Model):
         # Weight decay loss
         for var in self.layers[0].vars.values():
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
-        self.loss += self.placeholders['weight'] * tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        self.loss += self.placeholders['weight'] * tf.reduce_mean(
+            tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
         # tf.summary.scalar('loss', self.loss)
 
     def _accuracy(self):
@@ -256,9 +257,9 @@ class CheybyGCN(Model):
         return tf.argmax(self.outputs, 1)
 
 
-class InceptionGCN(Model):
+class InceptionGCN3L(Model):
     def __init__(self, placeholders, input_dim, num_class, locality_sizes, is_pool=True, **kwargs):
-        super(InceptionGCN, self).__init__(**kwargs)
+        super(InceptionGCN3L, self).__init__(**kwargs)
 
         self.inputs = placeholders['features']
         self.input_dim = input_dim
@@ -338,6 +339,80 @@ class InceptionGCN(Model):
         self.layers.append(SumLayer(name='sum_layer'))
         # last dense layer for predicting classes
         self.layers.append(Dense(input_dim=l3_output_size,
+                                 output_dim=self.num_class,
+                                 placeholders=self.placeholders,
+                                 dropout=False,
+                                 sparse_inputs=False,
+                                 act=lambda x: x,
+                                 bias=True,
+                                 name='dense_layer'))
+
+    def predict(self):
+        return tf.nn.softmax(self.outputs)
+
+
+class InceptionGCN2L(Model):
+    def __init__(self, placeholders, input_dim, num_class, locality_sizes, is_pool=True, **kwargs):
+        super(InceptionGCN2L, self).__init__(**kwargs)
+
+        self.inputs = placeholders['features']
+        self.input_dim = input_dim
+        self.num_class = num_class
+        self.placeholders = placeholders
+        self.locality_sizes = locality_sizes
+        self.is_pool = is_pool
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+        self.build()
+
+    def _loss(self):
+        # Weight decay loss
+        for var in self.layers[0].vars.values():
+            self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+        self.loss += self.placeholders['weight'] * tf.reduce_mean(
+            tf.nn.softmax_cross_entropy_with_logits(logits=self.outputs, labels=self.placeholders['labels']))
+        # tf.summary.scalar('loss', self.loss)
+
+    def _accuracy(self):
+        correct_prediction = tf.equal(tf.argmax(self.outputs, 1), tf.argmax(self.placeholders['labels']))
+        self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, dtype=tf.float32))
+        # tf.summary.scalar('acc', self.accuracy)
+
+    def _build(self):
+        # convolutional layer 1
+        self.layers.append(InceptionGC(input_dim=self.input_dim,
+                                       output_dim=FLAGS.hidden1,
+                                       locality_sizes=self.locality_sizes,
+                                       placeholders=self.placeholders,
+                                       act=tf.nn.relu,
+                                       dropout=True,
+                                       sparse_inputs=True,
+                                       logging=self.logging,
+                                       is_pool=self.is_pool,
+                                       name='IGC1'))
+
+        # changing input dim and output dim of layer 1 in different cases of pooling types
+        if not self.is_pool:
+            l2_input_size = len(self.locality_sizes) * FLAGS.hidden1
+            l2_output_size = len(self.locality_sizes) * FLAGS.hidden2
+        else:
+            l2_input_size = FLAGS.hidden1
+            l2_output_size = FLAGS.hidden2
+
+        # convolutional layer 2
+        self.layers.append(InceptionGC(input_dim=l2_input_size,
+                                       output_dim=FLAGS.hidden2,
+                                       locality_sizes=self.locality_sizes,
+                                       placeholders=self.placeholders,
+                                       act=tf.nn.relu,
+                                       dropout=True,
+                                       sparse_inputs=False,
+                                       logging=self.logging,
+                                       is_pool=self.is_pool,
+                                       name='IGC2'))
+
+        self.layers.append(SumLayer(name='sum_layer'))
+        # last dense layer for predicting classes
+        self.layers.append(Dense(input_dim=l2_output_size,
                                  output_dim=self.num_class,
                                  placeholders=self.placeholders,
                                  dropout=False,
