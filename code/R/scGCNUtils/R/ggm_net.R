@@ -2,14 +2,12 @@
 # elihei [<eheidari@student.ethz.ch>]
 # /Volumes/Projects/scGCN/code/R/scGCNUtils/R/ggm_net.R 
 
-#' construct and visualize Gaussian Graphical Models.
+#' Gaussian Graphical Model
 #'
 #' @description
-#' Fit a Gaussian Graphical Model to continuous-valued dataset employing a subset of methods from stepwise AIC, stepwise BIC, stepwise significance test, partial correlation thresholding, edgewise significance test, or glasso.
-#' Also visualizes the fitted Graphical Model.
+#' Fits a Gaussian Graphical Model to continuous-valued dataset employing a subset of methods from stepwise AIC, stepwise BIC, stepwise significance test, partial correlation thresholding, edgewise significance test, or glasso.
 #'
-#' @param data A normalized dataframe or matrix with no missing data of continuous measurements.
-#' @param methods A string or list of strings indicate methods used to construct the model. See the details for more information. (default = 'glasso')
+#' @param mtx An expression or count matrix with rows as features (e.g., genes) and columns as observations (e.g., cells).
 #' @param ... Any additional arguments.
 #'
 #' @details The function combines the methods to construct the model, that is, the edge set is the intersection of all edge sets each of which is found by a method. The package gRim is used to implement AIC, BIC, and stepwise significance test. The method glasso from the package glasso is used to provide a sparse estimation of the inverse covariance matrix.
@@ -23,29 +21,35 @@
 #'
 #' @section Additional arguments:
 #' \describe{
+#' \item{method}{A string or list of strings indicate methods used to construct the model. See the details for more information. (default = 'glasso')}  
+#' \item{stability}{A string or list of strings indicate methods used to construct the model. See the details for more information. (default = 'glasso')}  
+#' \item{rho_vals}{A vector of non-negative numerics, including regularization parameter for glasso (default = 0.1). To be used only when the method 'glasso' is used.}   
+#' \item{mc.cores}{Number of cores to be used for parallelization.}
 #' \item{threshold}{A threshold for partial correlation thresholding method (default = 0.05). To be used only when the method 'threshold' is used.}
 #' \item{significance}{A cutoff for edge significance (default = 0.05). To be used only when the method 'significance' is used.}
-#' \item{rho}{(Non-negative) regularization parameter for glasso (default = 0.1). To be used only when the method 'glasso' is used.}
+#' \item{log}{A logical indicating whether to log the computation times.}
+#' \item{verbose}{A logical indicating whether to print out the computation steps.}
 #' }
 #'
-#' @return an igraph object of the graphical model.
+#' @return The adjacency matrix as a sparse matrix of type `dgCMatrix`.
 #' @export
 #'
-#' @examples
-#' glasso_ggm = ggm(data = iris[1:4])
+#'
+#'
+#' @importFrom  Matrix dgCMatrix
+#' @importFrom  tictoc toc tic.log
+#' @importFrom  tidyverse %>% map
 #'
 #'
 #' @importFrom  gRbase cov2pcor stepwise
-#' @importFrom  purrr map
-#' @importFrom  gRim cmod
-#' @importFrom  graph graphNEL
+#' @importFrom  tidyverse map %>%
+#' @importFrom  gRim cmod 
+#' @importFrom  graph graphNEL nodes
 #' @importFrom  SIN sinUG getgraph
 #' @importFrom  glasso glasso
 #' @importFrom  igraph cluster_louvain betweenness membership V intersection
 #' @importFrom  stats C cov.wt
 #' @importFrom  methods as
-#' @importFrom  graph nodes
-#' @importFrom  dplyr %>%
 
 ggm_net <- function(mtx, ...) {
     # TODO: message

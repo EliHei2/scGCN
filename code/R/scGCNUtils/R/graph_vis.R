@@ -16,14 +16,14 @@
 #' @param ... Any additional arguments described below.
 #'
 #'
-#' @author  Elyas Heidari, Vahid Balazadeh
+#' @author  Elyas Heidari
 #'
 #' @return If plot = TRUE it plots the non-interactive graph (If plot.community = TRUE plots communities too) also returns a list contains:
 #' \item{graph}{an igraph object.}
 #' \item{betweenness}{betweenness measurements of each node.}
-#' \item{network}{a visNetwork plot of the graph.}
+#' \item{vis_net}{a visNetwork plot of the graph.}
 #' \item{communities}{a named vector indicating the community of each node.}
-#'
+#' \item{q_net}{a qqgraph object
 #' @export
 #'
 #' @examples
