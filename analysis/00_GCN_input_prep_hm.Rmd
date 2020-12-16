@@ -1,0 +1,391 @@
+---
+title: "Preprocessing Zebrafish Datasets"
+author:
+- name: Elyas Heidari
+  affiliation:
+  - Department of Biological Systems Sciences and Engineering, ETH Zurich, Switzerland 
+  - IMLS Institute for Molecular Life Sciences, University of Zurich, Switzerland
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  workflowr::wflow_html:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+
+<!-- 2020-06-12 22:41 -->
+<!-- elihei  [<eheidari@student.ethz.ch>]-->
+<!--/Volumes/Projects/scGCN/analysis/1-GCN_input_prep_pbmc.Rmd-->
+
+## Setup
+```{r setup, include = FALSE}
+library('BiocStyle')
+knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
+# wflow_build(files='analysis/1-GCN_input_prep_pbmc.Rmd', view=F, verbose=T, delete_cache=F)
+```
+
+## Initialization and imports
+```{r init_import}
+# imports
+suppressMessages(source('code/R/dep.R'))
+library('biomaRt')
+# initialization
+data_raw   = 'data_raw/human_mouse'
+data_tidy  = 'data_tidy/human_mouse'
+out_dir    = 'output/human_mouse'
+time_stamp = format(Sys.Date(), '%Y_%m_%d')
+data_input = sprintf('data_input/hm_t_%s', time_stamp)
+dir.create(data_input)
+dir.create(data_tidy)
+dir.create(out_dir)
+## penalization parameters
+rho_h    = 0.1
+rho_m    = 0.1
+max_mito = 10
+min_counts_cell  = 1000
+min_counts_gene  = 100
+min_cells   = 300 
+
+# dirs
+## read
+counts_mtx_m_f = file.path(data_raw, 'mouse_counts.mtx')
+gene_names_m_f = file.path(data_raw, 'gene_names_mouse.tsv')
+cell_meta_m_f  = file.path(data_raw, 'mouse_metadata.tsv')
+counts_mtx_h_f = file.path(data_raw, 'human_counts.mtx')
+gene_names_h_f = file.path(data_raw, 'gene_names_human.tsv')
+cell_meta_h_f  = file.path(data_raw, 'human_metadata.tsv')
+## write
+### analysis data
+wi_h_f  = file.path(data_tidy, sprintf('wi_adj_h_%s_%s.txt', rho_h, time_stamp))
+comm_dt_h_f = file.path(data_tidy, sprintf('gene_communities_h_%s_%s.txt', rho_h, time_stamp))
+wi_m_f  = file.path(data_tidy, sprintf('wi_adj_m_%s_%s.txt', rho_m, time_stamp))
+comm_dt_m_f = file.path(data_tidy, sprintf('gene_communities_m_%s_%s.txt', rho_m, time_stamp))
+### train data
+adj_f         = file.path(data_input, 'adj.txt')
+train_X_f     = file.path(data_input, 'data_train.txt')
+train_X_bin_f = file.path(data_input, 'data_train_bin.txt')
+train_y_f     = file.path(data_input, 'classes_train.txt')
+test_X_f      = file.path(data_input, 'data_test.txt')
+test_X_bin_f  = file.path(data_input, 'data_test_bin.txt')
+test_y_f      = file.path(data_input, 'classes_test.txt')
+### output
+graph_h_f = file.path(out_dir, sprintf('graph_hm_h_%s.pdf', time_stamp))
+graph_m_f   = file.path(out_dir, sprintf('graph_hm_m_%s.pdf', time_stamp))
+```
+
+
+
+## Load input data
+```{r load_input, message=FALSE, warning=FALSE, paged.print=FALSE}
+# cell metadata
+cell_meta_m    = cell_meta_m_f %>% fread %>% 
+    setnames(c('condition', 'rep', 'lib', 'barcode', 'batch', 'nCounts',
+        'mito_pct', ' X_type', 'cell_type', 'sub_type', 'x', 'y')) %>%
+    # .[nCounts > min_counts_cell & mito_pct < max_mito] %>%
+    .[, condition := ifelse(condition == 't', 'tumor', 'healthy')] %>%
+    .[, cell_id   := paste(lib, barcode, sep=':')] %>%
+    .[, .(cell_id, condition, cell_type, sub_type, nCounts, mito_pct)]
+# count matrix
+counts_mtx_m = counts_mtx_m_f %>% readMM %>% t
+cell_names = cell_meta_m$cell_id
+gene_names = gene_names_m_f %>% fread(header=F) %>% .$V1
+dimnames(counts_mtx_m) = list(gene_names, cell_names)
+rownames(counts_mtx_m) %<>% tolower
+counts_mtx_m %<>% .[-grep('mt-', rownames(.)),] %>%
+    .[rowSums(.) > min_counts_gene, ]
+cell_meta_m  %<>% .[nCounts > min_counts_cell & mito_pct < max_mito] 
+# %>%
+#     .[condition == 'tumor']
+counts_mtx_m %<>% .[, cell_meta_m$cell_id]
+# cell_meta_m_1  = cell_meta_m[condition == 'healthy']
+# cell_meta_m_2  = cell_meta_m[condition == 'tumor']
+
+cell_meta_h    = cell_meta_h_f %>% fread %>% 
+    .[, .(Patient, Tissue, Library, Barcode, `Total counts`, 
+        `Percent counts from mitochondrial genes`,
+        `Most likely LM22 cell type`, `Major cell type`, `Minor subset`)] %>%
+    setnames(c('patient_id', 'tissue', 'lib', 'barcode', 'nCounts',
+        'mito_pct', 'X_type', 'cell_type', 'sub_type')) %>%
+    .[, cell_id   := paste(lib, barcode, sep=':')] %>%
+    .[, condition := ifelse(tissue == 'blood', 'healthy', 'tumor')] %>%
+    .[, .(cell_id, condition, cell_type, sub_type, nCounts, mito_pct)] 
+    # %>%
+    # setkey(cell_id)
+# count matrix
+counts_mtx_h = counts_mtx_h_f %>% readMM %>% t 
+cell_names = cell_meta_h$cell_id
+gene_names = gene_names_h_f %>% fread(header=F) %>% .$V1
+dimnames(counts_mtx_h) = list(gene_names, cell_names)
+rownames(counts_mtx_h) %<>% tolower
+counts_mtx_h %<>% .[-grep('mt-', rownames(.)),] %>%
+    .[rowSums(.) > min_counts_gene, ]
+cell_meta_h  %<>% .[nCounts > min_counts_cell & mito_pct < max_mito] %>%
+    .[grepl('^b|^t', cell_type)] %>%
+    .[, cell_type := gsub('^b|^t', '', cell_type)]
+    #  %>%
+    # .[condition == 'tumor']
+counts_mtx_h %<>% .[, cell_meta_h$cell_id]
+# clean up
+gc()
+```
+
+```{r homo, message=FALSE, warning=FALSE, paged.print=FALSE}
+data_raw = 'data_raw/prior'
+# read
+homo_f = file.path(data_raw, 'HOM_AllOrganism.rpt.txt') 
+human_regNet_f = file.path(data_raw, 'human/human.source')
+# write
+homo_dt_f = file.path(data_raw, 'homo_dt.txt')
+homo_adj_mat_f = file.path(data_raw, 'homo_adj_%s.txt')
+homo_genes_f = file.path(data_raw, 'homo_genes_%s.txt')
+
+# homologus genes
+homo_dt = homo_f %>% fread %>% .[, c(1,2,4, 12)] %>%
+    setnames(c('ID', 'organism', 'symbol', 'Synonyms')) %>%
+    .[organism == 'mouse, laboratory' | organism == 'human'] %>%
+    .[, symbol := tolower(symbol)]
+
+tmp = dim(homo_dt)[1]
+to.bind = 1:tmp %>% # takes a while!
+    map(function(x) (strsplit(homo_dt[x]$Synonyms, '|', fixed=T) %>%
+        map(function(y) homo_dt[x, .(ID, organism, symbol=y)]))[[1]]) %>%
+    purrr::reduce(rbind)
+homo_dt = rbind(homo_dt[, 1:3], to.bind) %>% .[!is.na(symbol)]
+# cast to a usable version
+homo_cast_dt = unique(homo_dt) %>% 
+    dcast(ID ~ organism, value.var='symbol', fun.aggregate=function(x) paste(x[1])) %>%
+    as.data.table %>%
+    .[, lapply(.SD, tolower)] %>%
+    setnames('mouse, laboratory', 'mouse') %>%
+    .[human != 'na' & mouse != 'na'] %>%
+    .[human %in% rownames(counts_mtx_h) & mouse %in% rownames(counts_mtx_m)] %>%
+    setkey(human) 
+
+####
+counts_mtx_h %<>% .[homo_cast_dt$human, ]
+counts_mtx_m %<>% .[homo_cast_dt$mouse, ]
+rownames(counts_mtx_h) = rownames(counts_mtx_m)
+
+gc()
+```
+
+```{r ex, message=FALSE, warning=FALSE, paged.print=FALSE}
+mart = useMart('ensembl', dataset='mmusculus_gene_ensembl', host='www.ensembl.org')
+
+go_cellcycle = getBM(
+    attributes = c('ensembl_gene_id','external_gene_name'), 
+    filters    = 'go', 
+    values     = 'GO:0007049', 
+    mart       = mart)
+
+go_translation = getBM(
+    attributes = c('ensembl_gene_id','external_gene_name'), 
+    filters    = 'go', 
+    values     = 'GO:0006412', 
+    mart       = mart)
+
+go_ribosome = getBM(
+    attributes = c('ensembl_gene_id','external_gene_name'), 
+    filters    = 'go', 
+    values     = 'GO:0005840', 
+    mart       = mart)
+
+ex_genes = unique(c(
+    go_cellcycle$external_gene_name, 
+    go_translation$external_gene_name, 
+    go_ribosome$external_gene_name)) %>% tolower
+
+counts_mtx_m %<>% .[-which(rownames(.) %in% ex_genes),]
+counts_mtx_h %<>% .[-which(rownames(.) %in% ex_genes),]
+# #TODO:WRONG!!!!!!
+# shared_genes = intersect(rownames(counts_mtx_m), rownames(counts_mtx_h))
+# counts_mtx_m %<>% .[shared_genes, ]
+# counts_mtx_h %<>% .[shared_genes, ]
+gc()
+```
+
+## Select cell types
+```{r select, message=FALSE, warning=FALSE, paged.print=FALSE}
+types = intersect(cell_meta_h$cell_type, cell_meta_m$cell_type)
+cell_meta_h %<>% .[cell_type %in% types]
+cell_meta_m %<>% .[cell_type %in% types]
+# compute cell type frequencies
+cmp_h = table(cell_meta_h$cell_type)
+cmp_m = table(cell_meta_m$cell_type)
+# Select cell types with > 2000 samples within pbmc 1
+cmp_h = ifelse(cmp_h > 1000, cmp_h, 0)
+# cmp_h['CD14+ monocyte'] = 0
+meta_sub_h = cell_meta_h  %>%
+    .[, .SD[sample(1:dim(.SD)[1], 
+    min(..cmp_h[cell_type], 1000))], by = 'cell_type']
+meta_sub_m = cell_meta_m %>%
+    .[, .SD[sample(1:dim(.SD)[1],
+    min(..cmp_m[cell_type], ..cmp_m[cell_type]*..cmp_h[cell_type]))], by = 'cell_type']
+cmp_h = table(meta_sub_h$cell_type)
+cmp_m = table(meta_sub_m$cell_type)
+comp_all  = cbind(names(cmp_h), cmp_h, cmp_m) %>%
+    as.data.table %>%
+    setnames(c('type', 'h', 'm'))
+comp_all
+# subset count matrix based on cell types
+counts_mtx_h = counts_mtx_h %>% .[, meta_sub_h$cell_id]
+counts_mtx_m = counts_mtx_m %>% .[, meta_sub_m$cell_id]
+# remove redundant objects
+# rm(counts_mtx)
+# rm(cell_meta)
+# clean up
+gc()
+```
+
+<!-- ```{r hetmaps_1, message=FALSE, warning=FALSE, paged.print=FALSE}
+hm_comp = comp_all %>% melt(., id.vars='type') %>%
+    ggplot +
+    aes(x=variable, y=type, fill=as.numeric(value)) +
+    geom_tile() +
+    theme_bw() +
+    scale_fill_viridis(discrete=FALSE) 
+
+comp_all %>% ggplot +
+    aes()
+``` -->
+
+
+## Normalizaiton
+```{r norm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# +1 --> log2 --> 0-1 rescale (cells)
+sce_h = SingleCellExperiment(assays=list(counts=counts_mtx_h))
+norm_mtx_h = logNormCounts(sce_h) %>% logcounts 
+sce_m = SingleCellExperiment(assays=list(counts=counts_mtx_m))
+norm_mtx_m = logNormCounts(sce_m) %>% logcounts 
+
+# norm_mtx_1 = counts_mtx_1 %>% `+`(1) %>% log2 %>% apply(., 2, rescale)
+# norm_mtx_2 = counts_mtx_2 %>% `+`(1) %>% log2 %>% apply(., 2, rescale)
+# clean up
+gc()
+```
+
+## Select highly variable genes
+```{r hvg, message=FALSE, warning=FALSE, paged.print=FALSE}
+# select higly variable genes
+gene_vars_h = modelGeneVar(as.matrix(norm_mtx_h))
+hvg_h = getTopHVGs(gene_vars_h) %>% .[1:2000]
+gene_vars_m = modelGeneVar(as.matrix(norm_mtx_m))
+hvg_m = getTopHVGs(gene_vars_m) %>% .[1:2000]
+hvg  = intersect(hvg_h, hvg_m)
+# subset t: genes
+data_m = t(norm_mtx_m[hvg,])
+const_cols = which(colSds(as.matrix(data_m)) == 0)
+data_m %<>% as.data.table %>% .[, -..const_cols] 
+# subset h: genes
+data_h = t(norm_mtx_h[hvg,])
+data_h %<>% as.data.table %>% .[, -..const_cols]
+# remove redundant objects
+# rm(norm_mtx_1)
+# rm(norm_mtx_2)
+# clean up
+gc() 
+```
+
+## The GGM 
+```{r ggm, message=FALSE, warning=FALSE, paged.print=FALSE}
+# pbmc 1
+## penalization parameter
+ggm_h   = ggm(data_h, rho=0.15, threshold =.06)
+## exclude isolated nodes
+graph_h = ggm_h$graph
+isolated_h  = which(degree(graph_h) == 0)
+graph_h = delete.vertices(graph_h, isolated_h)
+## graph weights
+wi_h    = ggm_h$model$wi %>% .[-isolated_h, -isolated_h]
+colnames(wi_h) = rownames(wi_h) = names(V(graph_h))
+diag(wi_h) = 0
+## visualize graph
+# graph_h_f %>% pdf(width=5, height=5)
+res_h   = graph_vis(graph_h, plot=TRUE)
+title('(A) Human', line=2.5, sub=sprintf('gLasso, rho = %s', rho_h))
+# dev.off()
+## extract graph communities
+comm_h  = res_h$communities
+comm_dt_h   = data.table(GENE=names(comm_h), community=comm_h) %>%
+    setkey(community)
+# pbmc 2
+## construct ggm
+keep_genes  = names(V(graph_h))
+ggm_m   = ggm(data_m[, ..keep_genes], rho=0.1, threshold = .06)
+## exclude isolated nodes
+graph_m = ggm_m$graph
+isolated_m  = which(degree(graph_m)==0)
+graph_m = delete.vertices(graph_m, isolated_m)
+## graph weights
+wi_m    = ggm_m$model$wi %>% .[-isolated_m, -isolated_m]
+diag(wi_m) = 0
+colnames(wi_m) = rownames(wi_m) = names(V(graph_m))
+## visualize graph
+# graph_t_f %>% pdf(width=5, height=5)
+res_m   = graph_vis(graph_m, plot=T, groups=res_h$communities[-isolated_m])
+title('(B) Mouse', line=2.5, sub=sprintf('gLasso, rho = %s', rho_m))
+# dev.off()
+## extract graph communities
+comm_m  = res_m$communities
+comm_dt_m   = data.table(GENE=names(comm_m), community=comm_m) %>%
+    setkey(community)
+# subset data: exclude isolated genes
+data_h %<>% as.matrix %>% .[, -isolated_h] 
+data_m %<>% as.matrix %>% .[, -isolated_h]
+```
+<!-- ```{r graph_comp, message=FALSE, warning=FALSE, paged.p rint=FALSE}
+adj_1 = ifelse(wi_h != 0, 1, 0) 
+adj_2 = ifelse(wi_t != 0, 1, 0) 
+``` -->
+
+## UMAPs
+```{r umaps, message=FALSE, warning=FALSE, paged.print=FALSE}
+# h
+umap_h = uwot::umap(data_h) 
+meta_sub_h[, c('umap1', 'umap2') := list(..umap_h[,1], ..umap_h[,2])]
+plot_h = meta_sub_h %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=cell_type, shape=condition) +
+    geom_point(alpha=0.2) +
+    theme_bw() + 
+    theme(axis.text= element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    labs(title='Human')
+# t 
+umap_m  = uwot::umap(data_m) 
+meta_sub_m[, c('umap1', 'umap2') := list(..umap_m[,1], ..umap_m[,2])]
+plot_m  = meta_sub_m %>%
+    ggplot(.) +
+    aes(umap1, umap2, color=cell_type, shape=condition) +
+    geom_point(alpha = 0.2) +
+    theme_bw() + 
+    theme(axis.text = element_blank()) +
+    scale_color_brewer(palette="Dark2") +
+    # scale_fill_manual(colorRampPalette(brewer.pal(12, "Accent"))(12)) +
+    labs(title='Mouse')
+# draw
+(plot_m + plot_h) + plot_layout(guides = 'collect')
+``` 
+
+## Save results
+```{r save, message=FALSE, warning=FALSE, paged.print=FALSE}
+# analysis data
+## pbmc 1
+wi_h_f  %>% fwrite(wi_h, .)
+comm_dt_h_f %>% fwrite(comm_dt_h, .)
+## t
+wi_m_f  %>% fwrite(wi_m, .)
+comm_dt_m_f %>% fwrite(comm_dt_m, .)
+# train & test data
+adj_f     %>% fwrite(data.table(ifelse(abs(wi_h)>0.06, abs(wi_h), 0)), .)
+adj_f     %>% fwrite(data.table(abs(wi_h)), .)
+order_train = order(meta_sub_h$cell_type)
+train_X_f %>% fwrite(data.table(t(data_h[order_train,])), .)
+train_X_bin_f %>% fwrite(data.table(ifelse(t(data_h[order_train,]) > 10, 1, 0)), .)
+train_y_f %>% fwrite(meta_sub_h[order_train], .)
+order_test  = order(meta_sub_m$cell_type)
+test_X_f  %>% fwrite(data.table(t(data_m[order_test,])), .)
+test_X_bin_f %>% fwrite(data.table(ifelse(t(data_m[order_test,]) > 10, 1, 0)), .)
+test_y_f  %>% fwrite(meta_sub_m[order_test,], .)
+```

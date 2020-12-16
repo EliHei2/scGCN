@@ -24,28 +24,29 @@ knitr::opts_chunk$set(autodep=TRUE, cache=FALSE, dev='png', cache.lazy = FALSE)
 # wflow_build(files='analysis/1-GCN_input_prep_pbmc.Rmd', view=F, verbose=T, delete_cache=F)
 ```
 
+
 ## Initialization and imports
 ```{r init_import}
 # imports
 suppressMessages(source('code/R/dep.R'))
 # initialization
-data_input = 'data_input/pbmc_2020_11_12'
+data_input = 'data_input/pbmc_2020_09_01'
 data_tidy  = 'data_tidy/pbmc'
 model_dir  = 'models/pbmc_2020_11_12/models/pbmc'
 out_dir    = 'output/pbmc_2020_11_12'
 time_stamp = format(Sys.Date(), '%Y_%m_%d')
 # dirs
 ## input data
-adj1_f     = file.path(data_tidy, 'wi_adj_pbmc1_0.1_2020_11_12.txt')
-adj2_f     = file.path(data_tidy, 'wi_adj_pbmc2_0.1_2020_11_12.txt')
+adj1_f     = file.path(data_tidy, 'wi_adj_pbmc1_0.1_2020_09_01.txt')
+adj2_f     = file.path(data_tidy, 'wi_adj_pbmc2_0.1_2020_09_01.txt')
 train_X_f = file.path(data_input, 'data_train.txt')
 train_y_f = file.path(data_input, 'classes_train.txt')
 test_X_f  = file.path(data_input, 'data_test.txt')
 test_y_f  = file.path(data_input, 'classes_test.txt')
-comm_f    = file.path(data_tidy, 'gene_communities_pbmc1_0.1_2020_12_11.txt')
+comm_f    = file.path(data_tidy, 'gene_communities_pbmc1_0.1_2020_09_01.txt')
 ## labels
-train_idx_f = file.path(data_input, 'train_idx.txt')
-test_idx_f  = file.path(data_input, 'test_idx.txt')
+train_idx_f = file.path(data_input, 'train_idx_GCN.txt')
+test_idx_f  = file.path(data_input, 'test_idx_GCN.txt')
 ## node embeddings
 train_layers_f = file.path(model_dir, 'train_layer_')
 test_layers_f  = file.path(model_dir, 'test_layer_')
@@ -75,8 +76,8 @@ train_X   = train_X_f %>% fread %>% as.matrix %>% t %>% .[train_idx,]
 train_y   = train_y_f %>% fread %>% .[train_idx] 
 test_X    = test_X_f %>% fread %>% as.matrix %>% t %>% .[test_idx,]
 test_y    = test_y_f %>% fread %>% .[test_idx] 
-# train_y %>% .[grep('10x', Method), Method := '10x Chromium']
-# test_y %>% .[grep('10x', Method), Method := '10x Chromium']
+train_y %>% .[grep('10x', Method), Method := '10x Chromium']
+test_y %>% .[grep('10x', Method), Method := '10x Chromium']
 # grpah communities
 graph_com = comm_f %>% fread %>% 
     .[, color := c(brewer.pal(n=7,"Dark2"), brewer.pal(n=8,"Set3"))[community]] %>%
@@ -90,7 +91,84 @@ train_layers = 1:3 %>%
 test_layers  = 1:3 %>% 
     map(~ fread(sprintf('%s%s.csv', test_layers_f, .x), header=T)) %>%
     map(~ t(as.matrix(.x[, -1])))
+```
 
+
+## Graphs
+```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE}
+idx = which(train_y$cell_type == 'CD14+ monocyte' | train_y$cell_type == 'CD16+ monocyte')
+ggm_1   = ggm(data.table(train_layers[[1]])[idx], rho=0.2, threshold = 0.1)
+## exclude isolated nodes
+graph_1 = ggm_1$graph
+isolated_1  = which(degree(graph_1) == 0)
+graph_1 = delete.vertices(graph_1, isolated_1)
+## graph weights
+wi_1    = ggm_1$model$wi %>% .[-isolated_1, -isolated_1]
+colnames(wi_1) = rownames(wi_1) = names(V(graph_1))
+diag(wi_1) = 0
+
+adj_test = ifelse(abs(wi_1) > 0.1, 1, 0)
+graph1  = graph_from_adjacency_matrix(adj_test, 'undirected')
+lay_nc1 = layout_nicely(graph1)
+graph_col_comm(graph1, lay_nc1, 'cyan', 5, title='train1', labels=graph_com$GENE)  
+```
+
+## Graphs
+```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE}
+idx = which(train_y$cell_type == 'CD14+ monocyte' | train_y$cell_type == 'CD16+ monocyte')
+ggm_1   = ggm(data.table(train_layers[[2]])[idx], rho=0.2, threshold = 0.1)
+## exclude isolated nodes
+graph_1 = ggm_1$graph
+isolated_1  = which(degree(graph_1) == 0)
+graph_1 = delete.vertices(graph_1, isolated_1)
+## graph weights
+wi_1    = ggm_1$model$wi %>% .[-isolated_1, -isolated_1]
+colnames(wi_1) = rownames(wi_1) = names(V(graph_1))
+diag(wi_1) = 0
+
+adj_test = ifelse(abs(wi_1) > 0.1, 1, 0)
+graph1  = graph_from_adjacency_matrix(adj_test, 'undirected')
+lay_nc1 = layout_nicely(graph1)
+graph_col_comm(graph1, lay_nc1, 'cyan', 5, title='train2', labels=graph_com$GENE)   
+```
+
+## Graphs
+```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE}
+idx = which(train_y$cell_type == 'CD14+ monocyte' | train_y$cell_type == 'CD16+ monocyte')
+ggm_1   = ggm(data.table(train_layers[[3]])[idx], rho=0.2, threshold = 0.1)
+## exclude isolated nodes
+graph_1 = ggm_1$graph
+isolated_1  = which(degree(graph_1) == 0)
+graph_1 = delete.vertices(graph_1, isolated_1)
+## graph weights
+wi_1    = ggm_1$model$wi 
+# %>% .[-isolated_1, -isolated_1]
+colnames(wi_1) = rownames(wi_1) = names(V(graph_1))
+diag(wi_1) = 0
+
+adj_test = ifelse(abs(wi_1) > 0.1, 1, 0)
+graph1  = graph_from_adjacency_matrix(adj_test, 'undirected')
+lay_nc1 = layout_nicely(graph1)
+graph_col_comm(graph1, lay_nc1, 'cyan', 5, title='train31', labels=graph_com$GENE)   
+```
+
+## Graphs
+```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE}
+idx = grepl('T cell', train_y$cell_type)
+ggm_1   = ggm(data.table(train_layers[[3]])[idx], rho=0.2, threshold = 0.1)
+## exclude isolated nodes
+graph_1 = ggm_1$graph
+isolated_1  = which(degree(graph_1) == 0)
+graph_1 = delete.vertices(graph_1, isolated_1)
+## graph weights
+wi_1    = ggm_1$model$wi %>% .[-isolated_1, -isolated_1]
+colnames(wi_1) = rownames(wi_1) = names(V(graph_1))
+diag(wi_1) = 0
+
+adj_test = ifelse(abs(wi_1) > 0.1, 1, 0)
+graph1  = graph_from_adjacency_matrix(adj_test, 'undirected')
+lay_nc1 = layout_nicely(graph1)
+graph_col_comm(graph1, lay_nc1, 'cyan', 5, title='train32', labels=graph_com$GENE)   
 ```
 
 ## Graph Communities
@@ -123,34 +201,7 @@ lay_nc2 = layout_nicely(graph2)
 graph_col_comm(graph2, lay_nc2, graph_com$color, 5, title='pbmc2', labels=graph_com$GENE)
 ```
 
-## Graphs
-```{r graphs, message=FALSE, warning=FALSE, paged.print=FALSE}
-cell_type_graph <- function(type, title){
-    sprintf(graph_out, paste0(title, '_train')) %>% pdf()
-    train_idx = which(train_y$cell_type == type)
-    grp       = colMeans(train_X[train_idx,])
-    igraph::V(graph1)$color  = rgb(0, 0, floor(255*(grp^(1/2))/max(grp^(1/2))), maxColorValue=255, alpha=255)
-    plot.igraph(graph1,
-        vertex.size = 5,
-        layout = lay_nc1,
-        vertex.frame.color = igraph::V(graph1)$color,
-        vertex.label = "",
-        main=title)
-    dev.off()
-    sprintf(graph_out, paste0(title, '_test')) %>% pdf()
-    test_idx = which(test_y$cell_type == type)
-    grp       = colMeans(test_X[test_idx,])
-    igraph::V(graph1)$color  = rgb(0, 0, floor(255*(grp^(1/2))/max(grp^(1/2))), maxColorValue=255, alpha=255)
-    plot.igraph(graph1,
-    vertex.size = 5,
-    layout = lay_nc1,
-    vertex.label = "",
-    vertex.frame.color = igraph::V(graph1)$color)
-    dev.off()
-}
 
-unique(train_y$cell_type) %>% map(~cell_type_graph(.x, .x))
-```
 
 
 ## UMAPs
@@ -190,7 +241,7 @@ raw_layer  = rbind(train_X, test_X)
 sub_idx    = sample(1:dim(raw_layer)[1], 3000)
 # sub_idx    = 1:dim(raw_layer)[1]
 cell_types = c(train_y$cell_type, test_y$cell_type)[sub_idx]
-batches    = c(train_y$condition, test_y$condition)[sub_idx]
+batches    = c(train_y$Method, test_y$Method)[sub_idx]
 datasets   = c(rep('training', dim(train_X)[1]), rep('test', dim(test_X)[1]))[sub_idx]
 umap_raw   = list(plot_umap(raw_layer[sub_idx,], cell_types, datasets, batches, 'raw data'))
 
@@ -204,72 +255,3 @@ umap_plt    =  (umaps[[1]]$type + umaps[[2]]$type + umaps[[3]]$type + umaps[[4]]
 ```
 
 
-
-```{r heatmaps, message=FALSE, warning=FALSE, paged.print=FALSE}
-hm_conf <- function(dt, acc, dat){
-    melt(dt, id.vars='type') %>%
-        .[, `row scaled freq.` := value/sum(value), by= 'variable'] %>%
-        ggplot +
-        aes(x=type, y=variable, fill=`row scaled freq.`) +
-        geom_tile(colour = "white") +
-        geom_text(aes(label=value), colour = "white") +
-        theme_bw()+
-        theme(axis.ticks= element_blank()) +
-        labs(y='True cell type', x='Predicted cell type', title=sprintf('%s accuracy = %s', dat, acc))
-}
-
-cell_types = c('B', 'CD14+', 'CD16+', 'CD4+', 'Cyto', 'Dend.', 'Mega.', 'NK')
-train_dt = data.table(type=cell_types, 
-        `B`     = c(146, 1, 0, 1, 1, 1, 0, 0),
-        `CD14+` = c(0, 131, 6, 2, 2, 4, 5, 0),
-        `CD16+` = c(0, 4, 143, 0, 1, 1, 1, 0),
-        `CD4+`  = c(0, 3, 1, 116, 23, 1, 0, 6),
-        `Cyto.` = c(2, 2, 1, 16, 115, 0, 1, 13),
-        `Dend.` = c(0, 3, 0, 1, 0, 145, 0, 1),
-        `Mega.` = c(1, 2, 0, 1, 2, 0, 144, 0),
-        `NK`    = c(0, 0, 0, 2, 12, 1, 0, 135))
-conf_trian = train_dt %>% hm_conf(acc=0.896, dat='training')
-test_dt = data.table(type=cell_types, 
-        `B`     = c(2403, 13, 0, 4, 5, 17, 8, 0),
-        `CD14+` = c(2, 1328, 18, 1, 5, 225, 3, 0),
-        `CD16+`  = c(0, 40, 173, 1, 0, 15, 1, 0),
-        `CD4+`  = c(40, 24, 3, 2531, 196, 3, 35, 0),
-        `Cyto.`  = c(28, 18, 0, 188, 1734, 2, 19, 125),
-        `Dend.` = c(9, 46, 1, 0, 1, 148, 2, 0),
-        `Mega.` = c(0, 7, 0, 0, 3, 0, 51, 0),
-        `NK`   = c(2, 5, 1, 0, 142, 7, 4, 530))
-conf_test = test_dt %>% hm_conf(acc=0.875, dat='test')
-conf_hm   = conf_trian + conf_test +
-    plot_layout(guides = 'collect')
-
-Epoch 31:
-train: loss=0.001, acc=0.928
-test: loss=0.000, acc=0.863
----------------
-train confusion matrix:
- [[149   1   0   0   0   0   0   0]
- [  0 146   0   0   1   1   2   0]
- [  0   0 150   0   0   0   0   0]
- [  0   1   0 124  24   0   0   1]
- [  1   1   0   7 141   0   0   0]
- [  0   2   0   0   0 148   0   0]
- [  0   0   0   0   0   0 150   0]
- [  0   0   0   3  41   1   0 105]]
-test confusion matrix:
- [[2415    1    0   20    8    4    2    0]
- [  43 1322   19    8    3  181    6    0]
- [   7   22  195    0    3    1    2    0]
- [  24   18    0 2576  207    0    6    1]
- [  22    6    0  449 1533    0    8   96]
- [  33   15    0    0    1  156    2    0]
- [   0    7    0    1    1    1   51    0]
- [   3    0    0    3  159    0    0  526]]
-                                                               
-#  [  36   26  547 1505]]  
-```
-
-## Save results
-```{r name, message=FALSE, warning=FALSE, paged.print=FALSE}
-umap_out %>% ggsave(umap_plt, filename=., width=15, height=7, device='pdf')
-conf_out %>% ggsave(conf_hm, filename=., width=11, height=5, device='pdf')
-```
